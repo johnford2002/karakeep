@@ -19,6 +19,16 @@ const allEnv = z.object({
   API_URL: z.string().url().default("http://localhost:3000"),
   NEXTAUTH_URL: z.string().url().default("http://localhost:3000"),
   NEXTAUTH_SECRET: z.string().optional(),
+  
+  // Database configuration
+  DB_TYPE: z.enum(["sqlite", "postgres"]).default("sqlite"),
+  DATABASE_URL: z.string().optional(),
+  DB_HOST: z.string().optional(),
+  DB_PORT: z.coerce.number().optional(),
+  DB_USER: z.string().optional(),
+  DB_PASSWORD: z.string().optional(),
+  DB_NAME: z.string().optional(),
+  
   DISABLE_SIGNUPS: stringBool("false"),
   DISABLE_PASSWORD_AUTH: stringBool("false"),
   OAUTH_ALLOW_DANGEROUS_EMAIL_ACCOUNT_LINKING: stringBool("false"),
@@ -100,6 +110,15 @@ const serverConfigSchema = allEnv.transform((val) => {
         throw new Error("NEXTAUTH_SECRET is not set");
       }
       return val.NEXTAUTH_SECRET;
+    },
+    database: {
+      type: val.DB_TYPE,
+      url: val.DATABASE_URL,
+      host: val.DB_HOST,
+      port: val.DB_PORT,
+      user: val.DB_USER,
+      password: val.DB_PASSWORD,
+      name: val.DB_NAME,
     },
     auth: {
       disableSignups: val.DISABLE_SIGNUPS,

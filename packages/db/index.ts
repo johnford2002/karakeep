@@ -1,18 +1,20 @@
 import Database from "better-sqlite3";
 import { ExtractTablesWithRelations } from "drizzle-orm";
 import { SQLiteTransaction } from "drizzle-orm/sqlite-core";
+import { PostgresJsTransaction } from "drizzle-orm/postgres-js";
+import serverConfig from "@karakeep/shared/config";
 
-import * as schema from "./schema";
+import * as sqliteSchema from "./schema";
+import * as postgresSchema from "./schema-postgres";
 
-export { db } from "./drizzle";
+export { db, schema } from "./drizzle";
 export type { DB } from "./drizzle";
-export * as schema from "./schema";
 export { SqliteError } from "better-sqlite3";
 
-// This is exported here to avoid leaking better-sqlite types outside of this package.
-export type KarakeepDBTransaction = SQLiteTransaction<
-  "sync",
-  Database.RunResult,
-  typeof schema,
-  ExtractTablesWithRelations<typeof schema>
->;
+// Export transaction types based on database type
+const dbType = serverConfig.database.type;
+
+export type KarakeepDBTransaction = 
+  typeof dbType extends "postgres" 
+    ? PostgresJsTransaction<typeof postgresSchema, ExtractTablesWithRelations<typeof postgresSchema>>
+    : SQLiteTransaction<"sync", Database.RunResult, typeof sqliteSchema, ExtractTablesWithRelations<typeof sqliteSchema>>;
