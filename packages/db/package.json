@@ -10,7 +10,8 @@
     "generate": "drizzle-kit generate",
     "generate:postgres": "DB_TYPE=postgres drizzle-kit generate",
     "studio": "drizzle-kit studio",
-    "studio:postgres": "DB_TYPE=postgres drizzle-kit studio"
+    "studio:postgres": "DB_TYPE=postgres drizzle-kit studio",
+    "validate:postgres": "node validate-postgres.js"
   },
   "dependencies": {
     "@auth/core": "^0.27.0",
