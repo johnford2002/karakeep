@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5996a8c8-316c-4903-8f3e-e6df74229d65",
-  "prevId": "a9d5b2ec-2f17-42d8-972f-074b0fa07e41",
+  "id": "3e2d6b09-5a4e-4ddb-b44b-70ded16e2ae0",
+  "prevId": "240f4be9-65f7-4176-9376-fd2daa9b443c",
   "tables": {
     "account": {
       "name": "account",
@@ -610,9 +610,9 @@
           "autoincrement": false,
           "default": 200
         },
-        "videoDownloadStatus": {
-          "name": "videoDownloadStatus",
-          "type": "text",
+        "probeMetadataAt": {
+          "name": "probeMetadataAt",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -969,13 +969,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": false
-        },
-        "captureVideo": {
-          "name": "captureVideo",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         },
         "userId": {
           "name": "userId",

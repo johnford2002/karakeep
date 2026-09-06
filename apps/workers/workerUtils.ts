@@ -4,16 +4,16 @@ import { db, KarakeepDBTransaction } from "@karakeep/db";
 import { assets, AssetTypes, bookmarks } from "@karakeep/db/schema";
 
 type DBAssetType = typeof assets.$inferInsert;
-export async function updateAsset(
+export function updateAsset(
   oldAssetId: string | undefined,
   newAsset: DBAssetType,
   txn: KarakeepDBTransaction,
 ) {
   if (oldAssetId) {
-    await txn.delete(assets).where(eq(assets.id, oldAssetId));
+    txn.delete(assets).where(eq(assets.id, oldAssetId)).run();
   }
 
-  await txn.insert(assets).values(newAsset);
+  txn.insert(assets).values(newAsset).run();
 }
 
 export async function getBookmarkDetails(bookmarkId: string) {
@@ -34,6 +34,7 @@ export async function getBookmarkDetails(bookmarkId: string) {
     createdAt: bookmark.createdAt,
     captureVideo: bookmark.captureVideo,
     crawledAt: bookmark.link.crawledAt,
+    probeMetadataAt: bookmark.link.probeMetadataAt,
     screenshotAssetId: bookmark.assets.find(
       (a) => a.assetType == AssetTypes.LINK_SCREENSHOT,
     )?.id,

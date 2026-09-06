@@ -76,6 +76,10 @@ jobs:
         working-directory: apps/workers
         run: pnpm test
 
+      # - name: Plugins Tests
+      #   working-directory: packages/plugins
+      #   run: pnpm test
+
       - name: E2E Tests
         working-directory: packages/e2e_tests
         run: pnpm test

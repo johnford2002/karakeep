@@ -1,9 +1,14 @@
 import type { migrate as sqliteMigrate } from "drizzle-orm/better-sqlite3/migrator";
 import type { migrate as pgMigrate } from "drizzle-orm/postgres-js/migrator";
 
+import serverConfig from "@karakeep/shared/config";
+
 import { close, db, dialect } from "./drizzle";
 
-if (dialect === "postgresql") {
+if (serverConfig.degradedMode) {
+  console.log("Skipping database migrations in degraded mode");
+  await close();
+} else if (dialect === "postgresql") {
   const { migrate } =
     (await import("drizzle-orm/postgres-js/migrator")) as unknown as {
       migrate: typeof pgMigrate;

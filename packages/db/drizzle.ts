@@ -68,32 +68,24 @@ type _PgCompat =
 type _Used = _PgCompat; // suppress unused warning
 
 async function createSqliteDB() {
-  const { default: SqliteDatabase } =
-    (await import("better-sqlite3")) as unknown as {
-      default: new (filename: string | Buffer) => Database.Database;
-    };
   const { drizzle } =
     (await import("drizzle-orm/better-sqlite3")) as unknown as {
       drizzle: typeof sqliteDrizzle;
     };
+  // Imported dynamically so that better-sqlite3 is never loaded on the
+  // PostgreSQL path.
+  const { openSqliteDatabase } = await import("./sqlite");
 
   const databaseURL = serverConfig.dataDir
     ? `${serverConfig.dataDir}/db.db`
     : "./db.db";
 
   logger.info(`[db] opening SQLite database at ${databaseURL}`);
-  const sqlite = new SqliteDatabase(databaseURL);
+  const sqlite = openSqliteDatabase(databaseURL, {
+    readOnly: serverConfig.degradedMode,
+    walMode: serverConfig.database.walMode,
+  });
   _rawClient = sqlite;
-
-  if (serverConfig.database.walMode) {
-    sqlite.pragma("journal_mode = WAL");
-    sqlite.pragma("synchronous = NORMAL");
-  } else {
-    sqlite.pragma("journal_mode = DELETE");
-  }
-  sqlite.pragma("cache_size = -65536");
-  sqlite.pragma("foreign_keys = ON");
-  sqlite.pragma("temp_store = MEMORY");
 
   instrumentSqliteDatabase(sqlite);
 

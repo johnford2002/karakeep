@@ -1,108 +1,94 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-// Mock the Anthropic SDK: default export is a class exposing messages.create.
-const createMock = vi.fn();
-vi.mock("@anthropic-ai/sdk", () => ({
-  default: class {
-    messages = { create: createMock };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    constructor(public opts: any) {}
-  },
+import { OpenAIInferenceClient } from "./inference";
+import type { OpenAIInferenceConfig } from "./inference";
+
+const capturedBodies: Record<string, unknown>[] = [];
+const tagSchema = z.object({ tags: z.array(z.string()) });
+
+vi.mock("openai", () => {
+  const OpenAIMock = vi.fn().mockImplementation(() => ({
+    chat: {
+      completions: {
+        create: vi.fn(async (body: Record<string, unknown>) => {
+          capturedBodies.push(body);
+          return {
+            choices: [{ message: { content: "{}" } }],
+            usage: { total_tokens: 1 },
+          };
+        }),
+      },
+    },
+  }));
+
+  return { default: OpenAIMock };
+});
+
+vi.mock("openai/helpers/zod", () => ({
+  zodResponseFormat: (schema: unknown, name: string) => ({
+    type: "json_schema",
+    json_schema: { name, schema },
+  }),
 }));
 
-import { AnthropicInferenceClient } from "./inference";
-
-function makeClient(overrides = {}) {
-  return new AnthropicInferenceClient({
+function makeConfig(
+  outputSchema: OpenAIInferenceConfig["outputSchema"],
+): OpenAIInferenceConfig {
+  return {
     apiKey: "test-key",
-    textModel: "gpt-4.1-mini",
-    imageModel: "gpt-4o-mini",
-    maxOutputTokens: 100,
-    outputSchema: "structured",
-    ...overrides,
-  });
+    textModel: "test-text-model",
+    imageModel: "test-image-model",
+    contextLength: 2048,
+    maxOutputTokens: 1024,
+    useMaxCompletionTokens: false,
+    outputSchema,
+  };
 }
 
-beforeEach(() => {
-  createMock.mockReset();
-  createMock.mockResolvedValue({
-    content: [{ type: "text", text: '{"tags":["a"]}' }],
-    usage: { input_tokens: 10, output_tokens: 5 },
-  });
-});
-
-describe("AnthropicInferenceClient text inference", () => {
-  it("substitutes the Claude default when the model is the OpenAI default", async () => {
-    const client = makeClient();
-    await client.inferFromText("hi", { schema: null });
-    expect(createMock.mock.calls[0][0].model).toBe("claude-haiku-4-5");
+describe("OpenAIInferenceClient response_format", () => {
+  beforeEach(() => {
+    capturedBodies.length = 0;
   });
 
-  it("preserves an explicitly configured Claude model", async () => {
-    const client = makeClient({ textModel: "claude-sonnet-4-6" });
-    await client.inferFromText("hi", { schema: null });
-    expect(createMock.mock.calls[0][0].model).toBe("claude-sonnet-4-6");
+  it("omits response_format for schema-less text inference in json mode", async () => {
+    const client = new OpenAIInferenceClient(makeConfig("json"));
+
+    await client.inferFromText("summarize this text", { schema: null });
+
+    expect(capturedBodies).toHaveLength(1);
+    expect(capturedBodies[0].response_format).toBeUndefined();
   });
 
-  it("sends max_tokens and the user message, and returns text + summed tokens", async () => {
-    const client = makeClient();
-    const res = await client.inferFromText("hello", { schema: null });
-    const body = createMock.mock.calls[0][0];
-    expect(body.max_tokens).toBe(100);
-    expect(body.messages).toEqual([{ role: "user", content: "hello" }]);
-    expect(res.response).toBe('{"tags":["a"]}');
-    expect(res.totalTokens).toBe(15);
+  it("keeps json_object for schema-backed text inference in json mode", async () => {
+    const client = new OpenAIInferenceClient(makeConfig("json"));
+
+    await client.inferFromText("infer tags as json", { schema: tagSchema });
+
+    expect(capturedBodies).toHaveLength(1);
+    expect(capturedBodies[0].response_format).toEqual({ type: "json_object" });
   });
 
-  it("attaches output_config json_schema in structured mode when a schema is given", async () => {
-    const client = makeClient();
-    await client.inferFromText("hi", {
-      schema: z.object({ tags: z.array(z.string()) }),
-    });
-    const body = createMock.mock.calls[0][0];
-    expect(body.output_config.format.type).toBe("json_schema");
-    expect(body.output_config.format.schema).toBeTypeOf("object");
-  });
+  it("omits response_format for schema-less image inference in json mode", async () => {
+    const client = new OpenAIInferenceClient(makeConfig("json"));
 
-  it("omits output_config in plain mode", async () => {
-    const client = makeClient({ outputSchema: "plain" });
-    await client.inferFromText("hi", {
-      schema: z.object({ tags: z.array(z.string()) }),
-    });
-    expect(createMock.mock.calls[0][0].output_config).toBeUndefined();
-  });
-
-  it("omits output_config when structured mode has no schema (e.g. summarization)", async () => {
-    const client = makeClient();
-    await client.inferFromText("summarize", { schema: null });
-    expect(createMock.mock.calls[0][0].output_config).toBeUndefined();
-  });
-});
-
-describe("AnthropicInferenceClient image inference", () => {
-  it("builds a base64 image content block with the given media type", async () => {
-    const client = makeClient({ outputSchema: "plain" });
-    await client.inferFromImage("describe", "image/png", "BASE64DATA", {
+    await client.inferFromImage("describe this image", "image/png", "BASE64", {
       schema: null,
     });
-    const body = createMock.mock.calls[0][0];
-    expect(body.model).toBe("claude-haiku-4-5");
-    expect(body.messages[0].content).toEqual([
-      { type: "text", text: "describe" },
-      {
-        type: "image",
-        source: { type: "base64", media_type: "image/png", data: "BASE64DATA" },
-      },
-    ]);
-  });
-});
 
-describe("AnthropicInferenceClient embeddings", () => {
-  it("rejects with a clear unsupported error", async () => {
-    const client = makeClient();
-    await expect(client.generateEmbeddingFromText(["x"])).rejects.toThrow(
-      /does not provide an embeddings API/,
-    );
+    expect(capturedBodies).toHaveLength(1);
+    expect(capturedBodies[0].response_format).toBeUndefined();
+  });
+
+  it("keeps structured response_format for schema-backed text inference in structured mode", async () => {
+    const client = new OpenAIInferenceClient(makeConfig("structured"));
+
+    await client.inferFromText("infer tags", { schema: tagSchema });
+
+    expect(capturedBodies).toHaveLength(1);
+    expect(capturedBodies[0].response_format).toMatchObject({
+      type: "json_schema",
+      json_schema: { name: "schema" },
+    });
   });
 });
