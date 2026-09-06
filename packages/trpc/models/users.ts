@@ -4,7 +4,7 @@ import { and, count, desc, eq, gte, lte, sql } from "drizzle-orm";
 import invariant from "tiny-invariant";
 import { z } from "zod";
 
-import { dialect, domainFromUrl, isUniqueConstraintError } from "@karakeep/db";
+import { domainFromUrl, isUniqueConstraintError } from "@karakeep/db";
 import {
   assets,
   AssetTypes,
@@ -104,21 +104,23 @@ export class User {
   ) {
     // This transaction reads before writing, so reserve the writer slot before
     // taking a WAL snapshot that another connection could invalidate.
-    // SQLite uses "immediate" to acquire the write lock upfront and avoid
-    // SQLITE_BUSY deadlocks.  PostgreSQL doesn't need this — its MVCC
-    // handles concurrent writers natively.
+    //
+    // The callback is deliberately synchronous: better-sqlite3 >= 12 throws
+    // "Transaction function cannot return a promise", so every transaction
+    // body uses the driver's sync API (.all()/.run()).
     return await db.transaction(
-      async (trx) => {
+      (trx) => {
         let userRole = input.role;
         if (!userRole) {
-          const [{ count: userCount }] = await trx
+          const [{ count: userCount }] = trx
             .select({ count: count() })
-            .from(users);
+            .from(users)
+            .all();
           userRole = userCount === 0 ? "admin" : "user";
         }
 
         try {
-          const [result] = await trx
+          const [result] = trx
             .insert(users)
             .values({
               name: input.name,
@@ -130,7 +132,8 @@ export class User {
               bookmarkQuota: serverConfig.quotas.free.bookmarkLimit,
               storageQuota: serverConfig.quotas.free.assetSizeBytes,
             })
-            .returning();
+            .returning()
+            .all();
 
           return result;
         } catch (e) {
@@ -146,7 +149,7 @@ export class User {
           });
         }
       },
-      dialect === "sqlite" ? { behavior: "immediate" as const } : undefined,
+      { behavior: "immediate" },
     );
   }
 

@@ -267,6 +267,7 @@ function extractAnthropicText(message: Anthropic.Message): string {
     throw new Error(`Got no text content from Anthropic`);
   }
   return text;
+}
 
 export class EmbeddingClientFactory {
   static build(): EmbeddingClient | null {

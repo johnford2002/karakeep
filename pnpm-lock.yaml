@@ -727,7 +727,7 @@ importers:
         version: 3.6.0
       drizzle-orm:
         specifier: ^0.45.2
-        version: 0.45.2(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)
+        version: 0.45.2(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(postgres@3.4.9)
       fastest-levenshtein:
         specifier: ^1.0.16
         version: 1.0.16
@@ -950,7 +950,7 @@ importers:
         version: 16.4.5
       drizzle-orm:
         specifier: ^0.45.2
-        version: 0.45.2(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)
+        version: 0.45.2(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(postgres@3.4.9)
       execa:
         specifier: 9.3.1
         version: 9.3.1
@@ -974,7 +974,7 @@ importers:
         version: 24.1.3
       liteque:
         specifier: ^0.9.1
-        version: 0.9.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/react@19.2.15)(better-sqlite3@13.0.3)(react@19.2.3)
+        version: 0.9.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/react@19.2.15)(better-sqlite3@13.0.3)(postgres@3.4.9)(react@19.2.3)
       lru-cache:
         specifier: ^11.2.2
         version: 11.2.2
@@ -1162,7 +1162,7 @@ importers:
         version: 11.9.0(typescript@5.9.3)
       drizzle-orm:
         specifier: ^0.45.2
-        version: 0.45.2(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)
+        version: 0.45.2(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(postgres@3.4.9)
       file-type:
         specifier: ^21.2.0
         version: 21.2.0
@@ -1257,7 +1257,10 @@ importers:
         version: 0.31.10
       drizzle-orm:
         specifier: ^0.45.2
-        version: 0.45.2(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)
+        version: 0.45.2(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(postgres@3.4.9)
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
       tsx:
         specifier: ^4.8.1
         version: 4.20.3
@@ -1271,6 +1274,12 @@ importers:
       '@vercel/ncc':
         specifier: ^0.38.4
         version: 0.38.4
+      vite-tsconfig-paths:
+        specifier: ^6.1.1
+        version: 6.1.1(typescript@5.9.3)(vite@7.0.6(@types/node@24.10.3)(jiti@2.4.2)(lightningcss@1.30.1)(sass@1.102.0)(terser@5.49.0)(tsx@4.20.3)(yaml@2.9.0))
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.3)(happy-dom@20.3.9)(jiti@2.4.2)(jsdom@27.4.0(@noble/hashes@1.8.0))(lightningcss@1.30.1)(sass@1.102.0)(terser@5.49.0)(tsx@4.20.3)(yaml@2.9.0)
 
   packages/e2e_tests:
     dependencies:
@@ -1356,7 +1365,7 @@ importers:
         version: 11.0.2
       liteque:
         specifier: ^0.9.1
-        version: 0.9.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/react@19.2.15)(better-sqlite3@13.0.3)(react@19.2.3)
+        version: 0.9.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/react@19.2.15)(better-sqlite3@13.0.3)(postgres@3.4.9)(react@19.2.3)
       meilisearch:
         specifier: ^0.58.0
         version: 0.58.0
@@ -1401,6 +1410,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.104.1
+        version: 0.104.2(zod@4.3.6)
       cheerio:
         specifier: ^1.2.0
         version: 1.2.0
@@ -1580,7 +1592,7 @@ importers:
         version: 2.2.3
       drizzle-orm:
         specifier: ^0.45.2
-        version: 0.45.2(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)
+        version: 0.45.2(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(postgres@3.4.9)
       nodemailer:
         specifier: ^7.0.13
         version: 7.0.13
@@ -1847,6 +1859,15 @@ packages:
 
   '@antfu/install-pkg@1.1.0':
     resolution: {integrity: sha512-MGQsmw10ZyI+EJo45CdSER4zEb+p31LpDAFp2Z3gkSd1yqVZGi0Ebx++YTEMonJy4oChEMLsxZ64j8FH6sSqtQ==}
+
+  '@anthropic-ai/sdk@0.104.2':
+    resolution: {integrity: sha512-s1wEVDAtEwkS7Ajgep6PZKJLFqybRkmD3Byz+iVVsSpbDY0gjROXE9aOft6V3PMqynn3NTcycV5whga9tCzmKA==}
+    hasBin: true
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
+    peerDependenciesMeta:
+      zod:
+        optional: true
 
   '@apidevtools/json-schema-ref-parser@15.5.1':
     resolution: {integrity: sha512-69KDKWQvk5jfDQfSTzAUHkI731X7CaJLwQxlS87AXyFHoJzsd/Pufrqsz7PqXMgrtAA99D9Y6NujkEkzli6kVA==}
@@ -8006,6 +8027,9 @@ packages:
     resolution: {integrity: sha512-O/IEdcCUKkubz60tFbGA7ceITTAJsty+lBjNoorP4Z6XRqaFb/OjQjZODophEcuq68nKm6/0r+6/lLQ+XVpk8g==}
     engines: {node: '>=18.0.0'}
 
+  '@stablelib/base64@1.0.1':
+    resolution: {integrity: sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ==}
+
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
@@ -11437,6 +11461,9 @@ packages:
   fast-safe-stringify@2.1.1:
     resolution: {integrity: sha512-W+KJc2dmILlPplD/H4K9l9LcAHAfPtP6BY84uVLXQ6Evcz9Lcg33Y2z1IVblT6xdY54PXYVHEv+0Wpq8Io6zkA==}
 
+  fast-sha256@1.3.0:
+    resolution: {integrity: sha512-n11RGP/lrWEFI/bWdygLxhI+pVeo1ZYIVwvvPkW7azl/rOy+F3HYRZ2K5zeE9mmkhQppyv9sQFx0JM9UabnpPQ==}
+
   fast-string-truncated-width@1.2.1:
     resolution: {integrity: sha512-Q9acT/+Uu3GwGj+5w/zsGuQjh9O1TyywhIwAxHudtWrgF09nHOPrvTLhQevPbttcxjr/SNN7mJmfOw/B1bXgow==}
 
@@ -12758,6 +12785,10 @@ packages:
 
   json-schema-to-ts@2.7.2:
     resolution: {integrity: sha512-R1JfqKqbBR4qE8UyBR56Ms30LL62/nlhoz+1UkfI/VE7p54Awu919FZ6ZUPG8zIa3XB65usPJgr1ONVncUGSaQ==}
+    engines: {node: '>=16'}
+
+  json-schema-to-ts@3.1.1:
+    resolution: {integrity: sha512-+DWg8jCJG2TEnpy7kOm/7/AxaYoaRbjVB4LFZLySZlWn8exGs3A4OLJR966cVvU26N7X9TWxl+Jsw7dzAqKT6g==}
     engines: {node: '>=16'}
 
   json-schema-traverse@0.4.1:
@@ -15131,6 +15162,10 @@ packages:
     resolution: {integrity: sha512-3Ybi1tAuwAP9s0r1UQ2J4n5Y0G05bJkpUIO0/bI9MhwmD70S5aTWbXGBwxHrelT+XM1k6dM0pk+SwNkpTRN7Pg==}
     engines: {node: ^10 || ^12 || >=14}
 
+  postgres@3.4.9:
+    resolution: {integrity: sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw==}
+    engines: {node: '>=12'}
+
   postman-code-generators@2.1.1:
     resolution: {integrity: sha512-+egQK1Jf9a92QP23vRTKcDLOthIQmI7WI4czEsZq/wgguLMnVHJ26KlT8AVtpAdVw28hqUbHwicerYxRWCfjoA==}
     engines: {node: '>=18'}
@@ -16779,6 +16814,9 @@ packages:
   standard-navigation@0.0.5:
     resolution: {integrity: sha512-YAmzwAiiQVocZxO/VGPFiQHcu5pKiz09QIGC0MK6aRMoa3E0QkoTQgcqJr7ZZ3OMiNhu4DkaGElFI5htjOIDbw==}
 
+  standardwebhooks@1.1.1:
+    resolution: {integrity: sha512-bCbX9ZEyFkWPsRz7Bl3NuQUJohmwGSev/yhr7vhaGPlc4AfIrspIRa6cPTBuI1ItmrTDJ4d/S2hCsfe4+vQGnQ==}
+
   statuses@1.5.0:
     resolution: {integrity: sha512-OpZ3zP+jT1PI7I8nemJX4AKmAX070ZkYPVWV/AaKTJl+tXCTGyVdC1a4SL8RUQYEwk/f34ZX8UTykN68FwrqAA==}
     engines: {node: '>= 0.6'}
@@ -17277,6 +17315,9 @@ packages:
 
   ts-algebra@1.2.2:
     resolution: {integrity: sha512-kloPhf1hq3JbCPOTYoOWDKxebWjNb2o/LKnNfkWhxVVisFFmMJPPdJeGoGmM+iRLyoXAR61e08Pb+vUXINg8aA==}
+
+  ts-algebra@2.0.0:
+    resolution: {integrity: sha512-FPAhNPFMrkwz76P7cdjdmiShwMynZYN6SgOujD1urY4oNm80Ou9oMdmbR45LotcKOXoy7wSmHkRFE6Mxbrhefw==}
 
   ts-dedent@2.2.0:
     resolution: {integrity: sha512-q5W7tVM71e2xjHZTlgfTDoPF/SmqKG5hddq9SzR49CH2hayqRKJtQ4mtRlSxKaJlR/+9rEM+mnBHf7I2/BQcpQ==}
@@ -18615,6 +18656,13 @@ snapshots:
     dependencies:
       package-manager-detector: 1.6.0
       tinyexec: 1.0.4
+
+  '@anthropic-ai/sdk@0.104.2(zod@4.3.6)':
+    dependencies:
+      json-schema-to-ts: 3.1.1
+      standardwebhooks: 1.1.1
+    optionalDependencies:
+      zod: 4.3.6
 
   '@apidevtools/json-schema-ref-parser@15.5.1(@types/json-schema@7.0.15)':
     dependencies:
@@ -26842,6 +26890,8 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
+  '@stablelib/base64@1.0.1': {}
+
   '@standard-schema/spec@1.1.0': {}
 
   '@standard-schema/utils@0.3.0': {}
@@ -29998,19 +30048,21 @@ snapshots:
       esbuild: 0.25.6
       tsx: 4.21.0
 
-  drizzle-orm@0.33.0(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/react@19.2.15)(better-sqlite3@13.0.3)(react@19.2.3):
+  drizzle-orm@0.33.0(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/react@19.2.15)(better-sqlite3@13.0.3)(postgres@3.4.9)(react@19.2.3):
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
       '@types/better-sqlite3': 7.6.13
       '@types/react': 19.2.15
       better-sqlite3: 13.0.3
+      postgres: 3.4.9
       react: 19.2.3
 
-  drizzle-orm@0.45.2(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3):
+  drizzle-orm@0.45.2(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(postgres@3.4.9):
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
       '@types/better-sqlite3': 7.6.13
       better-sqlite3: 13.0.3
+      postgres: 3.4.9
 
   dset@3.1.4: {}
 
@@ -30764,6 +30816,8 @@ snapshots:
   fast-json-stable-stringify@2.1.0: {}
 
   fast-safe-stringify@2.1.1: {}
+
+  fast-sha256@1.3.0: {}
 
   fast-string-truncated-width@1.2.1: {}
 
@@ -32237,6 +32291,11 @@ snapshots:
       '@types/json-schema': 7.0.15
       ts-algebra: 1.2.2
 
+  json-schema-to-ts@3.1.1:
+    dependencies:
+      '@babel/runtime': 7.29.7
+      ts-algebra: 2.0.0
+
   json-schema-traverse@0.4.1: {}
 
   json-schema-traverse@1.0.0: {}
@@ -32433,11 +32492,11 @@ snapshots:
 
   liquid-json@0.3.1: {}
 
-  liteque@0.9.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/react@19.2.15)(better-sqlite3@13.0.3)(react@19.2.3):
+  liteque@0.9.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/react@19.2.15)(better-sqlite3@13.0.3)(postgres@3.4.9)(react@19.2.3):
     dependencies:
       async-mutex: 0.4.1
       better-sqlite3: 13.0.3
-      drizzle-orm: 0.33.0(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/react@19.2.15)(better-sqlite3@13.0.3)(react@19.2.3)
+      drizzle-orm: 0.33.0(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/react@19.2.15)(better-sqlite3@13.0.3)(postgres@3.4.9)(react@19.2.3)
       zod: 4.3.6
     transitivePeerDependencies:
       - '@aws-sdk/client-rds-data'
@@ -35283,6 +35342,8 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
+  postgres@3.4.9: {}
+
   postman-code-generators@2.1.1:
     dependencies:
       async: 3.2.6
@@ -37429,6 +37490,11 @@ snapshots:
 
   standard-navigation@0.0.5: {}
 
+  standardwebhooks@1.1.1:
+    dependencies:
+      '@stablelib/base64': 1.0.1
+      fast-sha256: 1.3.0
+
   statuses@1.5.0: {}
 
   statuses@2.0.1: {}
@@ -37941,6 +38007,8 @@ snapshots:
   trough@2.2.0: {}
 
   ts-algebra@1.2.2: {}
+
+  ts-algebra@2.0.0: {}
 
   ts-dedent@2.2.0: {}
 
