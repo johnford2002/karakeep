@@ -104,7 +104,7 @@ export async function handleAsAssetBookmark(
       }
       const fileName = path.basename(new URL(url).pathname);
       await withTransaction(db, async (trx) => {
-        updateAsset(
+        await updateAsset(
           undefined,
           {
             id: downloaded.assetId,
@@ -130,7 +130,7 @@ export async function handleAsAssetBookmark(
           .update(bookmarks)
           .set({ type: BookmarkTypes.ASSET })
           .where(eq(bookmarks.id, bookmarkId));
-        trx.delete(bookmarkLinks).where(eq(bookmarkLinks.id, bookmarkId)).run();
+        await trx.delete(bookmarkLinks).where(eq(bookmarkLinks.id, bookmarkId));
       });
       await AssetPreprocessingQueue.enqueue(
         {
@@ -415,7 +415,7 @@ export async function crawlAndParseUrl(
           .where(eq(bookmarkLinks.id, bookmarkId));
 
         if (screenshotAssetInfo) {
-          updateAsset(
+          await updateAsset(
             oldAssets.screenshotAssetId,
             {
               id: screenshotAssetInfo.assetId,
@@ -431,7 +431,7 @@ export async function crawlAndParseUrl(
           assetIdsToDelete.push(oldAssets.screenshotAssetId);
         }
         if (pdfAssetInfo) {
-          updateAsset(
+          await updateAsset(
             oldAssets.pdfAssetId,
             {
               id: pdfAssetInfo.assetId,
@@ -447,11 +447,11 @@ export async function crawlAndParseUrl(
           assetIdsToDelete.push(oldAssets.pdfAssetId);
         }
         if (imageAssetInfo) {
-          updateAsset(oldAssets.imageAssetId, imageAssetInfo, txn);
+          await updateAsset(oldAssets.imageAssetId, imageAssetInfo, txn);
           assetIdsToDelete.push(oldAssets.imageAssetId);
         }
         if (htmlContentAssetInfo.result === "stored") {
-          updateAsset(
+          await updateAsset(
             oldAssets.contentAssetId,
             {
               id: htmlContentAssetInfo.assetId,
@@ -501,7 +501,7 @@ export async function crawlAndParseUrl(
             } = archiveResult;
 
             await withTransaction(db, async (txn) => {
-              updateAsset(
+              await updateAsset(
                 oldAssets.fullPageArchiveAssetId,
                 {
                   id: fullPageArchiveAssetId,

@@ -234,7 +234,7 @@ async function runWorker(job: DequeuedJob<ZVideoRequest>) {
     });
 
     await withTransaction(db, async (txn) => {
-      updateAsset(
+      await updateAsset(
         oldVideoAssetId,
         {
           id: videoAssetId,

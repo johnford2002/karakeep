@@ -149,7 +149,7 @@ export class Asset {
     }
 
     await withTransaction(ctx.db, async (tx) => {
-      tx.delete(assets).where(eq(assets.id, input.oldAssetId)).run();
+      await tx.delete(assets).where(eq(assets.id, input.oldAssetId));
       await tx
         .update(assets)
         .set({

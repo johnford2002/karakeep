@@ -642,7 +642,7 @@ export class User {
       }
 
       if (previousAsset && !previousAsset.bookmarkId) {
-        tx.delete(assets).where(eq(assets.id, previousAsset.id)).run();
+        await tx.delete(assets).where(eq(assets.id, previousAsset.id));
       }
     });
 
