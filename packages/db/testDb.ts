@@ -20,6 +20,9 @@
  * TEMPLATE` takes a lock on the template, so doing it 448 times across parallel
  * workers would serialise the whole suite.
  */
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type postgres from "postgres";
 
@@ -133,7 +136,14 @@ export async function setupTemplateDatabase(): Promise<void> {
 
 function migrationsDir(): string {
   // Resolved from this file so it works regardless of the suite's cwd.
-  return new URL("./migrations/pg", import.meta.url).pathname;
+  //
+  // Deliberately not `new URL("./migrations/pg", import.meta.url)`: bundlers
+  // read that as a static asset reference and try to resolve it at build time,
+  // which fails because it is a directory. Next's Turbopack traces this module
+  // through drizzle.ts into the web app, so it has to stay resolvable there.
+  // drizzle.ts uses this same pattern for the SQLite migrations.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(here, "./migrations/pg");
 }
 
 /** Remove databases left behind by an interrupted run. */
