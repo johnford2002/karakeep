@@ -819,7 +819,10 @@ describe("Bookmark Routes", () => {
     const originallySavedAt = new Date("2026-01-01T00:00:00.000Z");
     const resavedAt = new Date("2026-01-02T00:00:00.000Z");
 
-    vi.useFakeTimers();
+    // Fake only Date: these tests want to control "now", not run timers, and
+    // faking setTimeout/setInterval stalls postgres-js's internal connection
+    // timers, which hangs every query on the PostgreSQL leg.
+    vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(originallySavedAt);
       const original = await api.createBookmark({
@@ -949,7 +952,10 @@ describe("Bookmark Routes", () => {
     const originallySavedAt = new Date("2026-01-01T00:00:00.000Z");
     const resavedAt = new Date("2026-01-02T00:00:00.000Z");
 
-    vi.useFakeTimers();
+    // Fake only Date: these tests want to control "now", not run timers, and
+    // faking setTimeout/setInterval stalls postgres-js's internal connection
+    // timers, which hangs every query on the PostgreSQL leg.
+    vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(originallySavedAt);
       const original = await api.createBookmark({

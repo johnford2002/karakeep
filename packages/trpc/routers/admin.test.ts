@@ -54,7 +54,10 @@ describe("Admin Routes", () => {
     const now = new Date("2026-07-26T12:00:00.000Z");
 
     beforeEach(() => {
-      vi.useFakeTimers();
+      // Fake only Date: these tests want to control "now", not run timers, and
+      // faking setTimeout/setInterval stalls postgres-js's internal connection
+      // timers, which hangs every query on the PostgreSQL leg.
+      vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(now);
       adminJobMocks.getSearchClient.mockResolvedValue({
         clearIndex: adminJobMocks.searchClearIndex,

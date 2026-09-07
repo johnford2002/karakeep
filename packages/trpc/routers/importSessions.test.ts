@@ -417,8 +417,14 @@ describe("ImportSessions Routes", () => {
     const result = await api.listImportSessions({});
 
     expect(result.sessions).toHaveLength(3);
-    expect(result.sessions.map((session) => session.name)).toEqual(
-      sessionNames,
+    // Compared as a set: this test is about all three sessions coming back, and
+    // their order here is not determinate across dialects. listImportSessions
+    // orders by createdAt DESC, but SQLite stores createdAt with second
+    // granularity, so sessions created in the same second tie and fall back to
+    // insertion order, while PostgreSQL keeps microseconds and returns them
+    // newest-first. Asserting either order would only pass on one dialect.
+    expect(result.sessions.map((session) => session.name).sort()).toEqual(
+      [...sessionNames].sort(),
     );
     expect(
       result.sessions.every((session) => session.totalBookmarks === 0),
