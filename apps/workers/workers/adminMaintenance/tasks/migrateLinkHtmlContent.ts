@@ -118,7 +118,7 @@ async function migrateBookmarkHtml(
         throw new Error("Failed to update bookmark");
       }
 
-      updateAsset(
+      await updateAsset(
         undefined,
         {
           id: assetId,

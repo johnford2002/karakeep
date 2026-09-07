@@ -4,16 +4,16 @@ import { db, KarakeepDBTransaction } from "@karakeep/db";
 import { assets, AssetTypes, bookmarks } from "@karakeep/db/schema";
 
 type DBAssetType = typeof assets.$inferInsert;
-export function updateAsset(
+export async function updateAsset(
   oldAssetId: string | undefined,
   newAsset: DBAssetType,
   txn: KarakeepDBTransaction,
 ) {
   if (oldAssetId) {
-    txn.delete(assets).where(eq(assets.id, oldAssetId)).run();
+    await txn.delete(assets).where(eq(assets.id, oldAssetId));
   }
 
-  txn.insert(assets).values(newAsset).run();
+  await txn.insert(assets).values(newAsset);
 }
 
 export async function getBookmarkDetails(bookmarkId: string) {
