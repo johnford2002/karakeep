@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { db as DONT_USE_DB } from "@karakeep/db";
+import { db as DONT_USE_DB, withTransaction } from "@karakeep/db";
 import {
   ruleEngineActionsTable,
   ruleEngineRulesTable,
@@ -87,8 +87,8 @@ export class RuleEngineRuleModel {
     input: z.infer<typeof zNewRuleEngineRuleSchema>,
   ): Promise<RuleEngineRuleModel> {
     // Similar to lists create, but for rules
-    const insertedRule = await ctx.db.transaction((tx) => {
-      const [newRule] = tx
+    const insertedRule = await withTransaction(ctx.db, async (tx) => {
+      const [newRule] = await tx
         .insert(ruleEngineRulesTable)
         .values({
           name: input.name,
@@ -102,27 +102,24 @@ export class RuleEngineRuleModel {
               ? input.event.tagId
               : null,
         })
-        .returning()
-        .all();
+        .returning();
 
       if (input.actions.length > 0) {
-        tx.insert(ruleEngineActionsTable)
-          .values(
-            input.actions.map((action) => ({
-              ruleId: newRule.id,
-              userId: ctx.user.id,
-              action: JSON.stringify(action),
-              listId:
-                action.type === "addToList" || action.type === "removeFromList"
-                  ? action.listId
-                  : null,
-              tagId:
-                action.type === "addTag" || action.type === "removeTag"
-                  ? action.tagId
-                  : null,
-            })),
-          )
-          .run();
+        await tx.insert(ruleEngineActionsTable).values(
+          input.actions.map((action) => ({
+            ruleId: newRule.id,
+            userId: ctx.user.id,
+            action: JSON.stringify(action),
+            listId:
+              action.type === "addToList" || action.type === "removeFromList"
+                ? action.listId
+                : null,
+            tagId:
+              action.type === "addTag" || action.type === "removeTag"
+                ? action.tagId
+                : null,
+          })),
+        );
       }
       return newRule;
     });
@@ -138,8 +135,8 @@ export class RuleEngineRuleModel {
       throw new TRPCError({ code: "BAD_REQUEST", message: "ID mismatch" });
     }
 
-    await this.ctx.db.transaction((tx) => {
-      const result = tx
+    await withTransaction(this.ctx.db, async (tx) => {
+      const result = await tx
         .update(ruleEngineRulesTable)
         .set({
           name: input.name,
@@ -157,34 +154,31 @@ export class RuleEngineRuleModel {
             eq(ruleEngineRulesTable.id, input.id),
             eq(ruleEngineRulesTable.userId, this.ctx.user.id),
           ),
-        )
-        .run();
+        );
 
       if (result.changes === 0) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Rule not found" });
       }
 
       if (input.actions.length > 0) {
-        tx.delete(ruleEngineActionsTable)
-          .where(eq(ruleEngineActionsTable.ruleId, input.id))
-          .run();
-        tx.insert(ruleEngineActionsTable)
-          .values(
-            input.actions.map((action) => ({
-              ruleId: input.id,
-              userId: this.ctx.user.id,
-              action: JSON.stringify(action),
-              listId:
-                action.type === "addToList" || action.type === "removeFromList"
-                  ? action.listId
-                  : null,
-              tagId:
-                action.type === "addTag" || action.type === "removeTag"
-                  ? action.tagId
-                  : null,
-            })),
-          )
-          .run();
+        await tx
+          .delete(ruleEngineActionsTable)
+          .where(eq(ruleEngineActionsTable.ruleId, input.id));
+        await tx.insert(ruleEngineActionsTable).values(
+          input.actions.map((action) => ({
+            ruleId: input.id,
+            userId: this.ctx.user.id,
+            action: JSON.stringify(action),
+            listId:
+              action.type === "addToList" || action.type === "removeFromList"
+                ? action.listId
+                : null,
+            tagId:
+              action.type === "addTag" || action.type === "removeTag"
+                ? action.tagId
+                : null,
+          })),
+        );
       }
     });
 

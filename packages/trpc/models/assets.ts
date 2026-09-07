@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { withTransaction } from "@karakeep/db";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -147,15 +148,15 @@ export class Asset {
       });
     }
 
-    await ctx.db.transaction((tx) => {
+    await withTransaction(ctx.db, async (tx) => {
       tx.delete(assets).where(eq(assets.id, input.oldAssetId)).run();
-      tx.update(assets)
+      await tx
+        .update(assets)
         .set({
           bookmarkId: input.bookmarkId,
           assetType: oldAsset.asset.assetType,
         })
-        .where(eq(assets.id, input.newAssetId))
-        .run();
+        .where(eq(assets.id, input.newAssetId));
     });
 
     await deleteAsset({

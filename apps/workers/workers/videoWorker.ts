@@ -11,7 +11,7 @@ import {
 } from "network";
 import { withWorkerEventLog, withWorkerTracing } from "workerTracing";
 
-import { db } from "@karakeep/db";
+import { db, withTransaction } from "@karakeep/db";
 import { AssetTypes, bookmarkLinks } from "@karakeep/db/schema";
 import {
   addLogFields,
@@ -233,7 +233,7 @@ async function runWorker(job: DequeuedJob<ZVideoRequest>) {
       quotaApproved,
     });
 
-    await db.transaction((txn) => {
+    await withTransaction(db, async (txn) => {
       updateAsset(
         oldVideoAssetId,
         {

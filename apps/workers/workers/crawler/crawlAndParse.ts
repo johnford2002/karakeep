@@ -11,7 +11,7 @@ import type { RunProxyConfig } from "network";
 import { abortRace, raceWith } from "utils";
 import { updateAsset } from "workerUtils";
 
-import { db } from "@karakeep/db";
+import { db, withTransaction } from "@karakeep/db";
 import {
   assets,
   AssetTypes,
@@ -103,7 +103,7 @@ export async function handleAsAssetBookmark(
         );
       }
       const fileName = path.basename(new URL(url).pathname);
-      await db.transaction((trx) => {
+      await withTransaction(db, async (trx) => {
         updateAsset(
           undefined,
           {
@@ -117,23 +117,19 @@ export async function handleAsAssetBookmark(
           },
           trx,
         );
-        trx
-          .insert(bookmarkAssets)
-          .values({
-            id: bookmarkId,
-            assetType,
-            assetId: downloaded.assetId,
-            content: null,
-            fileName,
-            sourceUrl: url,
-          })
-          .run();
+        await trx.insert(bookmarkAssets).values({
+          id: bookmarkId,
+          assetType,
+          assetId: downloaded.assetId,
+          content: null,
+          fileName,
+          sourceUrl: url,
+        });
         // Switch the type of the bookmark from LINK to ASSET
-        trx
+        await trx
           .update(bookmarks)
           .set({ type: BookmarkTypes.ASSET })
-          .where(eq(bookmarks.id, bookmarkId))
-          .run();
+          .where(eq(bookmarks.id, bookmarkId));
         trx.delete(bookmarkLinks).where(eq(bookmarkLinks.id, bookmarkId)).run();
       });
       await AssetPreprocessingQueue.enqueue(
@@ -400,8 +396,8 @@ export async function crawlAndParseUrl(
           ? (readableContent?.content ?? null)
           : null;
       readableContent = null;
-      await db.transaction((txn) => {
-        txn
+      await withTransaction(db, async (txn) => {
+        await txn
           .update(bookmarkLinks)
           .set({
             crawledAt: new Date(),
@@ -416,8 +412,7 @@ export async function crawlAndParseUrl(
             readerViewClassifierVersion:
               readerViewAssessment?.classifierVersion ?? null,
           })
-          .where(eq(bookmarkLinks.id, bookmarkId))
-          .run();
+          .where(eq(bookmarkLinks.id, bookmarkId));
 
         if (screenshotAssetInfo) {
           updateAsset(
@@ -472,10 +467,9 @@ export async function crawlAndParseUrl(
           assetIdsToDelete.push(oldAssets.contentAssetId);
         } else if (oldAssets.contentAssetId) {
           // Unlink the old content asset
-          txn
+          await txn
             .delete(assets)
-            .where(eq(assets.id, oldAssets.contentAssetId))
-            .run();
+            .where(eq(assets.id, oldAssets.contentAssetId));
           assetIdsToDelete.push(oldAssets.contentAssetId);
         }
       });
@@ -506,7 +500,7 @@ export async function crawlAndParseUrl(
               contentType,
             } = archiveResult;
 
-            await db.transaction((txn) => {
+            await withTransaction(db, async (txn) => {
               updateAsset(
                 oldAssets.fullPageArchiveAssetId,
                 {

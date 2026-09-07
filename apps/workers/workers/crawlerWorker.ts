@@ -10,7 +10,7 @@ import { withWorkerTracing, withWorkerEventLog } from "workerTracing";
 import { getBookmarkDetails } from "workerUtils";
 
 import type { ZCrawlLinkRequest } from "@karakeep/shared-server";
-import { db } from "@karakeep/db";
+import { db, withTransaction } from "@karakeep/db";
 import { bookmarkLinks, bookmarks } from "@karakeep/db/schema";
 import {
   addLogFields,
@@ -148,14 +148,15 @@ export class CrawlerWorker {
           );
           const bookmarkId = job.data?.bookmarkId;
           if (bookmarkId && job.numRetriesLeft == 0) {
-            await db.transaction((tx) => {
-              tx.update(bookmarkLinks)
+            await withTransaction(db, async (tx) => {
+              await tx
+                .update(bookmarkLinks)
                 .set({
                   crawlStatus: "failure",
                 })
-                .where(eq(bookmarkLinks.id, bookmarkId))
-                .run();
-              tx.update(bookmarks)
+                .where(eq(bookmarkLinks.id, bookmarkId));
+              await tx
+                .update(bookmarks)
                 .set({
                   taggingStatus: null,
                 })
@@ -164,9 +165,9 @@ export class CrawlerWorker {
                     eq(bookmarks.id, bookmarkId),
                     eq(bookmarks.taggingStatus, "pending"),
                   ),
-                )
-                .run();
-              tx.update(bookmarks)
+                );
+              await tx
+                .update(bookmarks)
                 .set({
                   summarizationStatus: null,
                 })
@@ -175,9 +176,9 @@ export class CrawlerWorker {
                     eq(bookmarks.id, bookmarkId),
                     eq(bookmarks.summarizationStatus, "pending"),
                   ),
-                )
-                .run();
-              tx.update(bookmarks)
+                );
+              await tx
+                .update(bookmarks)
                 .set({
                   embeddingStatus: null,
                 })
@@ -186,8 +187,7 @@ export class CrawlerWorker {
                     eq(bookmarks.id, bookmarkId),
                     eq(bookmarks.embeddingStatus, "pending"),
                   ),
-                )
-                .run();
+                );
             });
           }
         },

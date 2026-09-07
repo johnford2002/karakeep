@@ -2,7 +2,7 @@ import { and, asc, eq, gt, isNotNull, isNull, sql } from "drizzle-orm";
 
 import type { ZAdminMaintenanceMigrateLargeLinkHtmlTask } from "@karakeep/shared-server";
 import type { DequeuedJob } from "@karakeep/shared/queueing";
-import { db } from "@karakeep/db";
+import { db, withTransaction } from "@karakeep/db";
 import { AssetTypes, bookmarkLinks, bookmarks } from "@karakeep/db/schema";
 import {
   ASSET_TYPES,
@@ -103,8 +103,8 @@ async function migrateBookmarkHtml(
   }
 
   try {
-    await db.transaction((txn) => {
-      const res = txn
+    await withTransaction(db, async (txn) => {
+      const res = await txn
         .update(bookmarkLinks)
         .set({ htmlContent: null, contentAssetId: assetId })
         .where(
@@ -112,8 +112,7 @@ async function migrateBookmarkHtml(
             eq(bookmarkLinks.id, bookmarkId),
             isNull(bookmarkLinks.contentAssetId),
           ),
-        )
-        .run();
+        );
 
       if (res.changes === 0) {
         throw new Error("Failed to update bookmark");

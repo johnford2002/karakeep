@@ -4,7 +4,11 @@ import { and, count, desc, eq, gte, lte, sql } from "drizzle-orm";
 import invariant from "tiny-invariant";
 import { z } from "zod";
 
-import { domainFromUrl, isUniqueConstraintError } from "@karakeep/db";
+import {
+  domainFromUrl,
+  isUniqueConstraintError,
+  withTransaction,
+} from "@karakeep/db";
 import {
   assets,
   AssetTypes,
@@ -108,19 +112,19 @@ export class User {
     // The callback is deliberately synchronous: better-sqlite3 >= 12 throws
     // "Transaction function cannot return a promise", so every transaction
     // body uses the driver's sync API (.all()/.run()).
-    return await db.transaction(
-      (trx) => {
+    return await withTransaction(
+      db,
+      async (trx) => {
         let userRole = input.role;
         if (!userRole) {
-          const [{ count: userCount }] = trx
+          const [{ count: userCount }] = await trx
             .select({ count: count() })
-            .from(users)
-            .all();
+            .from(users);
           userRole = userCount === 0 ? "admin" : "user";
         }
 
         try {
-          const [result] = trx
+          const [result] = await trx
             .insert(users)
             .values({
               name: input.name,
@@ -132,8 +136,7 @@ export class User {
               bookmarkQuota: serverConfig.quotas.free.bookmarkLimit,
               storageQuota: serverConfig.quotas.free.assetSizeBytes,
             })
-            .returning()
-            .all();
+            .returning();
 
           return result;
         } catch (e) {
@@ -301,19 +304,17 @@ export class User {
       const token = randomBytes(32).toString("hex");
       const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
-      await ctx.db.transaction((tx) => {
+      await withTransaction(ctx.db, async (tx) => {
         // Invalidate any existing reset tokens for this user
-        tx.delete(passwordResetTokens)
-          .where(eq(passwordResetTokens.userId, user.id))
-          .run();
+        await tx
+          .delete(passwordResetTokens)
+          .where(eq(passwordResetTokens.userId, user.id));
 
-        tx.insert(passwordResetTokens)
-          .values({
-            userId: user.id,
-            token,
-            expires,
-          })
-          .run();
+        await tx.insert(passwordResetTokens).values({
+          userId: user.id,
+          token,
+          expires,
+        });
       });
 
       // Deliberately not awaited. Delivery latency is only incurred for real
@@ -630,11 +631,11 @@ export class User {
       return;
     }
 
-    await this.ctx.db.transaction((tx) => {
-      tx.update(users)
+    await withTransaction(this.ctx.db, async (tx) => {
+      await tx
+        .update(users)
         .set({ image: assetId })
-        .where(eq(users.id, this.user.id))
-        .run();
+        .where(eq(users.id, this.user.id));
 
       if (!previousImage || previousImage === assetId) {
         return;

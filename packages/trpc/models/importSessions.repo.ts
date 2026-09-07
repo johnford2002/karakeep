@@ -1,4 +1,5 @@
 import { and, count, eq, gt, lte } from "drizzle-orm";
+import { withTransaction } from "@karakeep/db";
 import { z } from "zod";
 
 import type { DB } from "@karakeep/db";
@@ -114,17 +115,17 @@ export class ImportSessionsRepo {
     // taking a WAL snapshot that another connection could invalidate.
     let archivedCount = 0;
     for (const session of sessions) {
-      const archived = await this.db.transaction(
-        (tx) => {
-          const statusCounts = tx
+      const archived = await withTransaction(
+        this.db,
+        async (tx) => {
+          const statusCounts = await tx
             .select({
               status: importStagingBookmarks.status,
               count: count(),
             })
             .from(importStagingBookmarks)
             .where(eq(importStagingBookmarks.importSessionId, session.id))
-            .groupBy(importStagingBookmarks.status)
-            .all();
+            .groupBy(importStagingBookmarks.status);
 
           const stats = {
             totalBookmarks: 0,
@@ -152,7 +153,7 @@ export class ImportSessionsRepo {
             }
           }
 
-          const result = tx
+          const result = await tx
             .update(importSessions)
             .set({ status: "archived", ...stats })
             .where(
@@ -160,19 +161,18 @@ export class ImportSessionsRepo {
                 eq(importSessions.id, session.id),
                 eq(importSessions.status, "completed"),
               ),
-            )
-            .run();
+            );
 
           if (result.changes === 0) {
             return false;
           }
 
-          tx.delete(importStagingBookmarks)
-            .where(eq(importStagingBookmarks.importSessionId, session.id))
-            .run();
-          tx.delete(importSessionBookmarks)
-            .where(eq(importSessionBookmarks.importSessionId, session.id))
-            .run();
+          await tx
+            .delete(importStagingBookmarks)
+            .where(eq(importStagingBookmarks.importSessionId, session.id));
+          await tx
+            .delete(importSessionBookmarks)
+            .where(eq(importSessionBookmarks.importSessionId, session.id));
           return true;
         },
         { behavior: "immediate" },

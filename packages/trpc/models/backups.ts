@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { withTransaction } from "@karakeep/db";
 import { and, desc, eq, lt } from "drizzle-orm";
 import { z } from "zod";
 
@@ -112,28 +113,28 @@ export class Backup {
       });
     }
 
-    await this.ctx.db.transaction((db) => {
+    await withTransaction(this.ctx.db, async (db) => {
       // Delete asset first
       if (this.backup.assetId) {
-        db.delete(assets)
+        await db
+          .delete(assets)
           .where(
             and(
               eq(assets.id, this.backup.assetId),
               eq(assets.userId, this.ctx.user.id),
             ),
-          )
-          .run();
+          );
       }
 
       // Delete backup record
-      db.delete(backupsTable)
+      await db
+        .delete(backupsTable)
         .where(
           and(
             eq(backupsTable.id, this.backup.id),
             eq(backupsTable.userId, this.ctx.user.id),
           ),
-        )
-        .run();
+        );
     });
   }
 

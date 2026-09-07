@@ -7,7 +7,7 @@ import { createWorker } from "tesseract.js";
 import { withWorkerEventLog, withWorkerTracing } from "workerTracing";
 
 import type { AssetPreprocessingRequest } from "@karakeep/shared-server";
-import { db } from "@karakeep/db";
+import { db, withTransaction } from "@karakeep/db";
 import {
   assets,
   AssetTypes,
@@ -69,8 +69,9 @@ export class AssetPreprocessingWorker {
 
             const bookmarkId = job.data?.bookmarkId;
             if (bookmarkId && job.numRetriesLeft == 0) {
-              await db.transaction((tx) => {
-                tx.update(bookmarks)
+              await withTransaction(db, async (tx) => {
+                await tx
+                  .update(bookmarks)
                   .set({
                     taggingStatus: null,
                   })
@@ -79,9 +80,9 @@ export class AssetPreprocessingWorker {
                       eq(bookmarks.id, bookmarkId),
                       eq(bookmarks.taggingStatus, "pending"),
                     ),
-                  )
-                  .run();
-                tx.update(bookmarks)
+                  );
+                await tx
+                  .update(bookmarks)
                   .set({
                     summarizationStatus: null,
                   })
@@ -90,9 +91,9 @@ export class AssetPreprocessingWorker {
                       eq(bookmarks.id, bookmarkId),
                       eq(bookmarks.summarizationStatus, "pending"),
                     ),
-                  )
-                  .run();
-                tx.update(bookmarks)
+                  );
+                await tx
+                  .update(bookmarks)
                   .set({
                     embeddingStatus: null,
                   })
@@ -101,8 +102,7 @@ export class AssetPreprocessingWorker {
                       eq(bookmarks.id, bookmarkId),
                       eq(bookmarks.embeddingStatus, "pending"),
                     ),
-                  )
-                  .run();
+                  );
               });
             }
             return Promise.resolve();

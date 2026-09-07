@@ -1,10 +1,15 @@
 import crypto from "node:crypto";
 import { TRPCError } from "@trpc/server";
-import { and, count, eq, inArray, or, sql } from "drizzle-orm";
+import { and, count, eq, inArray, or } from "drizzle-orm";
 import invariant from "tiny-invariant";
 import { z } from "zod";
 
-import { isUniqueConstraintError, KarakeepDBTransaction } from "@karakeep/db";
+import {
+  isUniqueConstraintError,
+  jsonTextMentions,
+  KarakeepDBTransaction,
+  withTransaction,
+} from "@karakeep/db";
 import {
   bookmarkLists,
   bookmarks,
@@ -497,8 +502,8 @@ export abstract class List {
     }
   }
 
-  protected cleanupRulesAfterListDeletion(tx: KarakeepDBTransaction) {
-    const rules = tx
+  protected async cleanupRulesAfterListDeletion(tx: KarakeepDBTransaction) {
+    const rules = await tx
       .select({
         id: ruleEngineRulesTable.id,
         event: ruleEngineRulesTable.event,
@@ -507,16 +512,11 @@ export abstract class List {
       .where(
         and(
           eq(ruleEngineRulesTable.userId, this.ctx.user.id),
-          sql`json_valid(${ruleEngineRulesTable.event})`,
-          sql`json_extract(${ruleEngineRulesTable.event}, '$.type') IN ('addedToList', 'removedFromList')`,
-          sql`EXISTS (
-            SELECT 1
-            FROM json_each(json_extract(${ruleEngineRulesTable.event}, '$.listIds'))
-            WHERE value = ${this.list.id}
-          )`,
+          // Portable prefilter; the loop below parses and validates each row
+          // and is what actually decides whether a rule references this list.
+          jsonTextMentions(ruleEngineRulesTable.event, this.list.id),
         ),
-      )
-      .all();
+      );
     const rulesToDelete: string[] = [];
     const rulesToUpdate: { id: string; event: string }[] = [];
 
@@ -544,6 +544,11 @@ export abstract class List {
         const filtered = ruleEventData.listIds.filter(
           (id: string) => id !== this.list.id,
         );
+        if (filtered.length === ruleEventData.listIds.length) {
+          // The prefilter is a substring match, so a rule can come back having
+          // mentioned this id somewhere other than listIds. Nothing to do.
+          continue;
+        }
         if (filtered.length === 0) {
           rulesToDelete.push(rule.id);
         } else {
@@ -561,37 +566,36 @@ export abstract class List {
     }
 
     if (rulesToDelete.length > 0) {
-      tx.delete(ruleEngineRulesTable)
-        .where(inArray(ruleEngineRulesTable.id, rulesToDelete))
-        .run();
+      await tx
+        .delete(ruleEngineRulesTable)
+        .where(inArray(ruleEngineRulesTable.id, rulesToDelete));
     }
 
     if (rulesToUpdate.length > 0) {
       for (const { id, event } of rulesToUpdate) {
-        tx.update(ruleEngineRulesTable)
+        await tx
+          .update(ruleEngineRulesTable)
           .set({ event })
-          .where(eq(ruleEngineRulesTable.id, id))
-          .run();
+          .where(eq(ruleEngineRulesTable.id, id));
       }
     }
   }
 
   async delete() {
     this.ensureCanManage();
-    await this.ctx.db.transaction((tx) => {
-      const res = tx
+    await withTransaction(this.ctx.db, async (tx) => {
+      const res = await tx
         .delete(bookmarkLists)
         .where(
           and(
             eq(bookmarkLists.id, this.list.id),
             eq(bookmarkLists.userId, this.ctx.user.id),
           ),
-        )
-        .run();
+        );
       if (res.changes == 0) {
         throw new TRPCError({ code: "NOT_FOUND" });
       }
-      this.cleanupRulesAfterListDeletion(tx);
+      await this.cleanupRulesAfterListDeletion(tx);
     });
   }
 
@@ -1152,22 +1156,22 @@ export class ManualList extends List {
 
     const bookmarkIds = await this.getBookmarkIds();
 
-    await this.ctx.db.transaction((tx) => {
-      tx.insert(bookmarksInLists)
+    await withTransaction(this.ctx.db, async (tx) => {
+      await tx
+        .insert(bookmarksInLists)
         .values(
           bookmarkIds.map((id) => ({
             bookmarkId: id,
             listId: targetList.id,
           })),
         )
-        .onConflictDoNothing()
-        .run();
+        .onConflictDoNothing();
 
       if (deleteSourceAfterMerge) {
-        tx.delete(bookmarkLists)
-          .where(eq(bookmarkLists.id, this.list.id))
-          .run();
-        this.cleanupRulesAfterListDeletion(tx);
+        await tx
+          .delete(bookmarkLists)
+          .where(eq(bookmarkLists.id, this.list.id));
+        await this.cleanupRulesAfterListDeletion(tx);
       }
     });
   }

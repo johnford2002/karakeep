@@ -15,7 +15,7 @@ import {
   userReadingProgress,
   users,
 } from "@karakeep/db/schema";
-import { dialect } from "@karakeep/db";
+import { dialect, withTransaction } from "@karakeep/db";
 import {
   addLogFields,
   AssetPreprocessingQueue,
@@ -349,10 +349,11 @@ export const bookmarksAppRouter = router({
         }
       }
 
-      const bookmark = await ctx.db.transaction(
-        (tx) => {
+      const bookmark = await withTransaction(
+        ctx.db,
+        async (tx) => {
           // Check user quota
-          const quotaResult = QuotaService.canCreateBookmarkInTransaction(
+          const quotaResult = await QuotaService.canCreateBookmarkInTransaction(
             tx,
             ctx.user.id,
           );
@@ -362,7 +363,7 @@ export const bookmarksAppRouter = router({
               message: quotaResult.error,
             });
           }
-          const bookmark = tx
+          const [bookmark] = await tx
             .insert(bookmarks)
             .values({
               userId: ctx.user.id,
@@ -378,23 +379,22 @@ export const bookmarksAppRouter = router({
               summarizationStatus:
                 input.type === BookmarkTypes.LINK ? "pending" : null,
             })
-            .returning()
-            .all()[0];
+            .returning();
 
           let content: ZBookmarkContent;
 
           switch (input.type) {
             case BookmarkTypes.LINK: {
-              const link = tx
+              const [link] = await tx
                 .insert(bookmarkLinks)
                 .values({
                   id: bookmark.id,
                   url: input.url.trim(),
                 })
-                .returning()
-                .all()[0];
+                .returning();
               if (input.precrawledArchiveId) {
-                tx.update(assets)
+                await tx
+                  .update(assets)
                   .set({
                     bookmarkId: bookmark.id,
                     assetType: AssetTypes.LINK_PRECRAWLED_ARCHIVE,
@@ -404,8 +404,7 @@ export const bookmarksAppRouter = router({
                       eq(assets.id, input.precrawledArchiveId),
                       eq(assets.userId, ctx.user.id),
                     ),
-                  )
-                  .run();
+                  );
               }
               content = {
                 type: BookmarkTypes.LINK,
@@ -414,15 +413,14 @@ export const bookmarksAppRouter = router({
               break;
             }
             case BookmarkTypes.TEXT: {
-              const text = tx
+              const [text] = await tx
                 .insert(bookmarkTexts)
                 .values({
                   id: bookmark.id,
                   text: input.text,
                   sourceUrl: input.sourceUrl,
                 })
-                .returning()
-                .all()[0];
+                .returning();
               content = {
                 type: BookmarkTypes.TEXT,
                 text: text.text ?? "",
@@ -431,7 +429,7 @@ export const bookmarksAppRouter = router({
               break;
             }
             case BookmarkTypes.ASSET: {
-              const [asset] = tx
+              const [asset] = await tx
                 .insert(bookmarkAssets)
                 .values({
                   id: bookmark.id,
@@ -442,9 +440,9 @@ export const bookmarksAppRouter = router({
                   fileName: input.fileName ?? null,
                   sourceUrl: input.sourceUrl ?? null,
                 })
-                .returning()
-                .all();
-              tx.update(assets)
+                .returning();
+              await tx
+                .update(assets)
                 .set({
                   bookmarkId: bookmark.id,
                   assetType: AssetTypes.BOOKMARK_ASSET,
@@ -454,8 +452,7 @@ export const bookmarksAppRouter = router({
                     eq(assets.id, input.assetId),
                     eq(assets.userId, ctx.user.id),
                   ),
-                )
-                .run();
+                );
               content = {
                 type: BookmarkTypes.ASSET,
                 assetType: asset.assetType,
@@ -575,7 +572,7 @@ export const bookmarksAppRouter = router({
     .output(zBookmarkSchema)
     .use(ensureBookmarkOwnership)
     .mutation(async ({ input, ctx }) => {
-      await ctx.db.transaction((tx) => {
+      await withTransaction(ctx.db, async (tx) => {
         let somethingChanged = false;
 
         // Update link-specific fields if any are provided
@@ -607,11 +604,10 @@ export const bookmarksAppRouter = router({
         }
 
         if (Object.keys(linkUpdateData).length > 0) {
-          const result = tx
+          const result = await tx
             .update(bookmarkLinks)
             .set(linkUpdateData)
-            .where(eq(bookmarkLinks.id, input.bookmarkId))
-            .run();
+            .where(eq(bookmarkLinks.id, input.bookmarkId));
           if (result.changes == 0) {
             throw new TRPCError({
               code: "BAD_REQUEST",
@@ -623,13 +619,12 @@ export const bookmarksAppRouter = router({
         }
 
         if (input.text) {
-          const result = tx
+          const result = await tx
             .update(bookmarkTexts)
             .set({
               text: input.text,
             })
-            .where(eq(bookmarkTexts.id, input.bookmarkId))
-            .run();
+            .where(eq(bookmarkTexts.id, input.bookmarkId));
 
           if (result.changes == 0) {
             throw new TRPCError({
@@ -642,13 +637,12 @@ export const bookmarksAppRouter = router({
         }
 
         if (input.assetContent !== undefined) {
-          const result = tx
+          const result = await tx
             .update(bookmarkAssets)
             .set({
               content: input.assetContent,
             })
-            .where(and(eq(bookmarkAssets.id, input.bookmarkId)))
-            .run();
+            .where(and(eq(bookmarkAssets.id, input.bookmarkId)));
 
           if (result.changes == 0) {
             throw new TRPCError({
@@ -696,15 +690,15 @@ export const bookmarksAppRouter = router({
         }
 
         if (Object.keys(commonUpdateData).length > 1 || somethingChanged) {
-          tx.update(bookmarks)
+          await tx
+            .update(bookmarks)
             .set(commonUpdateData)
             .where(
               and(
                 eq(bookmarks.userId, ctx.user.id),
                 eq(bookmarks.id, input.bookmarkId),
               ),
-            )
-            .run();
+            );
         }
       });
 
@@ -800,30 +794,29 @@ export const bookmarksAppRouter = router({
     )
     .use(ensureBookmarkOwnership)
     .mutation(async ({ input, ctx }) => {
-      await ctx.db.transaction((tx) => {
-        const res = tx
+      await withTransaction(ctx.db, async (tx) => {
+        const res = await tx
           .update(bookmarkTexts)
           .set({
             text: input.text,
           })
           .where(and(eq(bookmarkTexts.id, input.bookmarkId)))
-          .returning()
-          .all();
+          .returning();
         if (res.length == 0) {
           throw new TRPCError({
             code: "NOT_FOUND",
             message: "Bookmark not found",
           });
         }
-        tx.update(bookmarks)
+        await tx
+          .update(bookmarks)
           .set({ modifiedAt: new Date() })
           .where(
             and(
               eq(bookmarks.id, input.bookmarkId),
               eq(bookmarks.userId, ctx.user.id),
             ),
-          )
-          .run();
+          );
       });
       await Promise.all([
         triggerSearchReindex(input.bookmarkId, {
@@ -1382,25 +1375,24 @@ export const bookmarksAppRouter = router({
       const allIdsToAttach = attachTagsWithNames.map((t) => t.id);
       const idsToRemove = detachTagsWithNames.map((t) => t.id);
 
-      const res = await ctx.db.transaction((tx) => {
+      const res = await withTransaction(ctx.db, async (tx) => {
         let numChanges = 0;
         // Detaches
         if (idsToRemove.length > 0) {
-          const res = tx
+          const res = await tx
             .delete(tagsOnBookmarks)
             .where(
               and(
                 eq(tagsOnBookmarks.bookmarkId, input.bookmarkId),
                 inArray(tagsOnBookmarks.tagId, idsToRemove),
               ),
-            )
-            .run();
+            );
           numChanges += res.changes;
         }
 
         // Attach tags
         if (allIdsToAttach.length > 0) {
-          const res = tx
+          const res = await tx
             .insert(tagsOnBookmarks)
             .values(
               allIdsToAttach.map((i) => ({
@@ -1409,22 +1401,21 @@ export const bookmarksAppRouter = router({
                 attachedBy: tagIdToAttachedBy.get(i) ?? "human",
               })),
             )
-            .onConflictDoNothing()
-            .run();
+            .onConflictDoNothing();
           numChanges += res.changes;
         }
 
         // Update bookmark modified timestamp
         if (numChanges > 0) {
-          tx.update(bookmarks)
+          await tx
+            .update(bookmarks)
             .set({ modifiedAt: new Date() })
             .where(
               and(
                 eq(bookmarks.id, input.bookmarkId),
                 eq(bookmarks.userId, ctx.user.id),
               ),
-            )
-            .run();
+            );
         }
 
         return {

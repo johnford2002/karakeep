@@ -46,25 +46,22 @@ export class QuotaService {
     } as const;
   }
 
-  static canCreateBookmarkInTransaction(
+  static async canCreateBookmarkInTransaction(
     tx: KarakeepDBTransaction,
     userId: string,
   ) {
-    const user = tx.query.users
-      .findFirst({
-        where: eq(users.id, userId),
-        columns: {
-          bookmarkQuota: true,
-        },
-      })
-      .sync();
+    const user = await tx.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: {
+        bookmarkQuota: true,
+      },
+    });
 
     if (user?.bookmarkQuota !== null && user?.bookmarkQuota !== undefined) {
-      const currentBookmarkCount = tx
+      const currentBookmarkCount = await tx
         .select({ count: count() })
         .from(bookmarks)
-        .where(eq(bookmarks.userId, userId))
-        .all();
+        .where(eq(bookmarks.userId, userId));
 
       return this.bookmarkQuotaResult(
         user.bookmarkQuota,

@@ -14,7 +14,7 @@ import {
 import { z } from "zod";
 
 import type { ZAttachedByEnum } from "@karakeep/shared/types/tags";
-import { isUniqueConstraintError } from "@karakeep/db";
+import { isUniqueConstraintError, withTransaction } from "@karakeep/db";
 import { bookmarkTags, tagsOnBookmarks } from "@karakeep/db/schema";
 import { triggerSearchReindex } from "@karakeep/shared-server";
 import {
@@ -246,16 +246,16 @@ export class Tag {
       });
     }
 
-    const { deletedTags, affectedBookmarks } = await ctx.db.transaction(
-      (trx) => {
-        const unlinked = trx
+    const { deletedTags, affectedBookmarks } = await withTransaction(
+      ctx.db,
+      async (trx) => {
+        const unlinked = await trx
           .delete(tagsOnBookmarks)
           .where(and(inArray(tagsOnBookmarks.tagId, input.fromTagIds)))
-          .returning()
-          .all();
+          .returning();
 
         if (unlinked.length > 0) {
-          trx
+          await trx
             .insert(tagsOnBookmarks)
             .values(
               unlinked.map((u) => ({
@@ -263,11 +263,10 @@ export class Tag {
                 tagId: input.intoTagId,
               })),
             )
-            .onConflictDoNothing()
-            .run();
+            .onConflictDoNothing();
         }
 
-        const deletedTags = trx
+        const deletedTags = await trx
           .delete(bookmarkTags)
           .where(
             and(
@@ -275,8 +274,7 @@ export class Tag {
               eq(bookmarkTags.userId, ctx.user.id),
             ),
           )
-          .returning({ id: bookmarkTags.id })
-          .all();
+          .returning({ id: bookmarkTags.id });
 
         return {
           deletedTags,
