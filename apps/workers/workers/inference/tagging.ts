@@ -10,7 +10,7 @@ import type {
   InferenceResponse,
 } from "@karakeep/shared/inference";
 import type { ZTagStyle } from "@karakeep/shared/types/users";
-import { db } from "@karakeep/db";
+import { db, withTransaction } from "@karakeep/db";
 import {
   bookmarks,
   bookmarkTags,
@@ -20,10 +20,11 @@ import {
 } from "@karakeep/db/schema";
 import {
   addLogFields,
+  ASSET_TYPES,
+  readAsset,
   setSpanAttributes,
   triggerSearchReindex,
 } from "@karakeep/shared-server";
-import { ASSET_TYPES, readAsset } from "@karakeep/shared/assetdb";
 import serverConfig from "@karakeep/shared/config";
 import logger from "@karakeep/shared/logger";
 import { buildImagePrompt } from "@karakeep/shared/prompts";
@@ -419,86 +420,92 @@ async function connectTags(
     return;
   }
 
-  const res = await db.transaction(async (tx) => {
-    // Attempt to match exiting tags with the new ones
-    const { matchedTagIds, notFoundTagNames } = await (async () => {
-      const { normalizeTag } = tagNormalizer();
-      const normalizedInferredTags = inferredTags.map((t) => ({
-        originalTag: t,
-        normalizedTag: normalizeTag(t),
-      }));
+  // This transaction reads before writing, so reserve the writer slot before
+  // taking a WAL snapshot that another connection could invalidate.
+  const res = await withTransaction(
+    db,
+    async (tx) => {
+      // Attempt to match exiting tags with the new ones
+      const { matchedTagIds, notFoundTagNames } = await (async () => {
+        const { normalizeTag } = tagNormalizer();
+        const normalizedInferredTags = inferredTags.map((t) => ({
+          originalTag: t,
+          normalizedTag: normalizeTag(t),
+        }));
 
-      const matchedTags = await tx.query.bookmarkTags.findMany({
-        where: and(
-          eq(bookmarkTags.userId, userId),
-          inArray(
-            bookmarkTags.normalizedName,
-            normalizedInferredTags.map((t) => t.normalizedTag),
-          ),
-        ),
-      });
-
-      const matchedTagIds = matchedTags.map((r) => r.id);
-      const notFoundTagNames = normalizedInferredTags
-        .filter(
-          (t) =>
-            !matchedTags.some(
-              (mt) => normalizeTag(mt.name) === t.normalizedTag,
+        const matchedTags = await tx.query.bookmarkTags.findMany({
+          where: and(
+            eq(bookmarkTags.userId, userId),
+            inArray(
+              bookmarkTags.normalizedName,
+              normalizedInferredTags.map((t) => t.normalizedTag),
             ),
+          ),
+        });
+
+        const matchedTagIds = matchedTags.map((r) => r.id);
+        const notFoundTagNames = normalizedInferredTags
+          .filter(
+            (t) =>
+              !matchedTags.some(
+                (mt) => normalizeTag(mt.name) === t.normalizedTag,
+              ),
+          )
+          .map((t) => t.originalTag);
+
+        return { matchedTagIds, notFoundTagNames };
+      })();
+
+      // Create tags that didn't exist previously
+      let newTagIds: string[] = [];
+      if (notFoundTagNames.length > 0) {
+        newTagIds = (
+          await tx
+            .insert(bookmarkTags)
+            .values(
+              notFoundTagNames.map((t) => ({
+                name: t,
+                userId,
+              })),
+            )
+            .onConflictDoNothing()
+            .returning()
+        ).map((t) => t.id);
+      }
+
+      // Delete old AI tags
+      const detachedTags = await tx
+        .delete(tagsOnBookmarks)
+        .where(
+          and(
+            eq(tagsOnBookmarks.attachedBy, "ai"),
+            eq(tagsOnBookmarks.bookmarkId, bookmarkId),
+          ),
         )
-        .map((t) => t.originalTag);
+        .returning();
 
-      return { matchedTagIds, notFoundTagNames };
-    })();
+      const allTagIds = new Set([...matchedTagIds, ...newTagIds]);
 
-    // Create tags that didn't exist previously
-    let newTagIds: string[] = [];
-    if (notFoundTagNames.length > 0) {
-      newTagIds = (
-        await tx
-          .insert(bookmarkTags)
+      // Attach new ones
+      let attachedTags: { tagId: string; bookmarkId: string }[] = [];
+      if (allTagIds.size > 0) {
+        attachedTags = await tx
+          .insert(tagsOnBookmarks)
           .values(
-            notFoundTagNames.map((t) => ({
-              name: t,
-              userId,
+            [...allTagIds].map((tagId) => ({
+              tagId,
+              bookmarkId,
+              attachedBy: "ai" as const,
             })),
           )
           .onConflictDoNothing()
-          .returning()
-      ).map((t) => t.id);
-    }
+          .returning();
+      }
 
-    // Delete old AI tags
-    const detachedTags = await tx
-      .delete(tagsOnBookmarks)
-      .where(
-        and(
-          eq(tagsOnBookmarks.attachedBy, "ai"),
-          eq(tagsOnBookmarks.bookmarkId, bookmarkId),
-        ),
-      )
-      .returning();
-
-    const allTagIds = new Set([...matchedTagIds, ...newTagIds]);
-
-    // Attach new ones
-    let attachedTags: { tagId: string; bookmarkId: string }[] = [];
-    if (allTagIds.size > 0) {
-      attachedTags = await tx
-        .insert(tagsOnBookmarks)
-        .values(
-          [...allTagIds].map((tagId) => ({
-            tagId,
-            bookmarkId,
-            attachedBy: "ai" as const,
-          })),
-        )
-        .onConflictDoNothing()
-        .returning();
-    }
-
-    return { detachedTags, attachedTags };
-  });
+      return { detachedTags, attachedTags };
+    },
+    { behavior: "immediate" },
+  );
 
   await RuleEngine.triggerOnEvent(userId, bookmarkId, [
     ...res.detachedTags.map((t) => ({

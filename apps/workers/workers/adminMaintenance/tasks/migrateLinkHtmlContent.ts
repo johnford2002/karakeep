@@ -2,15 +2,15 @@ import { and, asc, eq, gt, isNotNull, isNull, sql } from "drizzle-orm";
 
 import type { ZAdminMaintenanceMigrateLargeLinkHtmlTask } from "@karakeep/shared-server";
 import type { DequeuedJob } from "@karakeep/shared/queueing";
-import { db } from "@karakeep/db";
+import { db, withTransaction } from "@karakeep/db";
 import { AssetTypes, bookmarkLinks, bookmarks } from "@karakeep/db/schema";
-import { QuotaService } from "@karakeep/shared-server";
 import {
   ASSET_TYPES,
   deleteAsset,
   newAssetId,
+  QuotaService,
   saveAsset,
-} from "@karakeep/shared/assetdb";
+} from "@karakeep/shared-server";
 import serverConfig from "@karakeep/shared/config";
 import logger from "@karakeep/shared/logger";
 import { tryCatch } from "@karakeep/shared/tryCatch";
@@ -103,7 +103,7 @@ async function migrateBookmarkHtml(
   }
 
   try {
-    await db.transaction(async (txn) => {
+    await withTransaction(db, async (txn) => {
       const res = await txn
         .update(bookmarkLinks)
         .set({ htmlContent: null, contentAssetId: assetId })
@@ -118,7 +118,7 @@ async function migrateBookmarkHtml(
         throw new Error("Failed to update bookmark");
       }
 
-      await updateAsset(
+      updateAsset(
         undefined,
         {
           id: assetId,

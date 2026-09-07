@@ -7,7 +7,7 @@ import { createWorker } from "tesseract.js";
 import { withWorkerEventLog, withWorkerTracing } from "workerTracing";
 
 import type { AssetPreprocessingRequest } from "@karakeep/shared-server";
-import { db } from "@karakeep/db";
+import { db, withTransaction } from "@karakeep/db";
 import {
   assets,
   AssetTypes,
@@ -18,12 +18,14 @@ import {
   addLogFields,
   AssetPreprocessingQueue,
   EmbeddingsQueue,
+  newAssetId,
   OpenAIQueue,
   QuotaService,
+  readAsset,
+  saveAsset,
   StorageQuotaError,
   triggerSearchReindex,
 } from "@karakeep/shared-server";
-import { newAssetId, readAsset, saveAsset } from "@karakeep/shared/assetdb";
 import serverConfig from "@karakeep/shared/config";
 import { InferenceClientFactory } from "@karakeep/shared/inference";
 import logger from "@karakeep/shared/logger";
@@ -67,7 +69,7 @@ export class AssetPreprocessingWorker {
 
             const bookmarkId = job.data?.bookmarkId;
             if (bookmarkId && job.numRetriesLeft == 0) {
-              await db.transaction(async (tx) => {
+              await withTransaction(db, async (tx) => {
                 await tx
                   .update(bookmarks)
                   .set({

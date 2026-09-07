@@ -14,7 +14,7 @@ import {
 import { z } from "zod";
 
 import type { ZAttachedByEnum } from "@karakeep/shared/types/tags";
-import { isUniqueConstraintError } from "@karakeep/db";
+import { isUniqueConstraintError, withTransaction } from "@karakeep/db";
 import { bookmarkTags, tagsOnBookmarks } from "@karakeep/db/schema";
 import { triggerSearchReindex } from "@karakeep/shared-server";
 import {
@@ -246,7 +246,8 @@ export class Tag {
       });
     }
 
-    const { deletedTags, affectedBookmarks } = await ctx.db.transaction(
+    const { deletedTags, affectedBookmarks } = await withTransaction(
+      ctx.db,
       async (trx) => {
         const unlinked = await trx
           .delete(tagsOnBookmarks)

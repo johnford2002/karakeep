@@ -1,10 +1,15 @@
 import crypto from "node:crypto";
 import { TRPCError } from "@trpc/server";
-import { and, count, eq, inArray, or, sql } from "drizzle-orm";
+import { and, count, eq, inArray, or } from "drizzle-orm";
 import invariant from "tiny-invariant";
 import { z } from "zod";
 
-import { isUniqueConstraintError, KarakeepDBTransaction } from "@karakeep/db";
+import {
+  isUniqueConstraintError,
+  jsonTextMentions,
+  KarakeepDBTransaction,
+  withTransaction,
+} from "@karakeep/db";
 import {
   bookmarkLists,
   bookmarks,
@@ -287,6 +292,39 @@ export abstract class List {
     return [...ownedLists, ...sharedLists];
   }
 
+  static async getSizes(
+    ctx: AuthedContext,
+    lists: readonly (ManualList | SmartList)[],
+  ): Promise<Map<string, number>> {
+    const manualListIds = lists
+      .filter((list) => list.type === "manual")
+      .map((list) => list.id);
+    const smartLists = lists.filter((list) => list.type === "smart");
+
+    const [manualSizes, smartSizes] = await Promise.all([
+      manualListIds.length > 0
+        ? ctx.db
+            .select({
+              listId: bookmarksInLists.listId,
+              size: count(),
+            })
+            .from(bookmarksInLists)
+            .where(inArray(bookmarksInLists.listId, manualListIds))
+            .groupBy(bookmarksInLists.listId)
+        : Promise.resolve([]),
+      Promise.all(
+        smartLists.map(
+          async (list) => [list.id, await list.getSize()] as const,
+        ),
+      ),
+    ]);
+
+    const sizes = new Map(lists.map((list) => [list.id, 0]));
+    manualSizes.forEach(({ listId, size }) => sizes.set(listId, size));
+    smartSizes.forEach(([listId, size]) => sizes.set(listId, size));
+    return sizes;
+  }
+
   static async getAllOwned(
     ctx: AuthedContext,
   ): Promise<(ManualList | SmartList)[]> {
@@ -474,13 +512,9 @@ export abstract class List {
       .where(
         and(
           eq(ruleEngineRulesTable.userId, this.ctx.user.id),
-          sql`json_valid(${ruleEngineRulesTable.event})`,
-          sql`json_extract(${ruleEngineRulesTable.event}, '$.type') IN ('addedToList', 'removedFromList')`,
-          sql`EXISTS (
-            SELECT 1
-            FROM json_each(json_extract(${ruleEngineRulesTable.event}, '$.listIds'))
-            WHERE value = ${this.list.id}
-          )`,
+          // Portable prefilter; the loop below parses and validates each row
+          // and is what actually decides whether a rule references this list.
+          jsonTextMentions(ruleEngineRulesTable.event, this.list.id),
         ),
       );
     const rulesToDelete: string[] = [];
@@ -510,6 +544,11 @@ export abstract class List {
         const filtered = ruleEventData.listIds.filter(
           (id: string) => id !== this.list.id,
         );
+        if (filtered.length === ruleEventData.listIds.length) {
+          // The prefilter is a substring match, so a rule can come back having
+          // mentioned this id somewhere other than listIds. Nothing to do.
+          continue;
+        }
         if (filtered.length === 0) {
           rulesToDelete.push(rule.id);
         } else {
@@ -533,20 +572,18 @@ export abstract class List {
     }
 
     if (rulesToUpdate.length > 0) {
-      await Promise.all(
-        rulesToUpdate.map(({ id, event }) =>
-          tx
-            .update(ruleEngineRulesTable)
-            .set({ event })
-            .where(eq(ruleEngineRulesTable.id, id)),
-        ),
-      );
+      for (const { id, event } of rulesToUpdate) {
+        await tx
+          .update(ruleEngineRulesTable)
+          .set({ event })
+          .where(eq(ruleEngineRulesTable.id, id));
+      }
     }
   }
 
   async delete() {
     this.ensureCanManage();
-    await this.ctx.db.transaction(async (tx) => {
+    await withTransaction(this.ctx.db, async (tx) => {
       const res = await tx
         .delete(bookmarkLists)
         .where(
@@ -1119,7 +1156,7 @@ export class ManualList extends List {
 
     const bookmarkIds = await this.getBookmarkIds();
 
-    await this.ctx.db.transaction(async (tx) => {
+    await withTransaction(this.ctx.db, async (tx) => {
       await tx
         .insert(bookmarksInLists)
         .values(

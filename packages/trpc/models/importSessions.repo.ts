@@ -1,8 +1,13 @@
-import { and, count, eq, gt } from "drizzle-orm";
+import { and, count, eq, gt, lte } from "drizzle-orm";
+import { withTransaction } from "@karakeep/db";
 import { z } from "zod";
 
 import type { DB } from "@karakeep/db";
-import { importSessions, importStagingBookmarks } from "@karakeep/db/schema";
+import {
+  importSessionBookmarks,
+  importSessions,
+  importStagingBookmarks,
+} from "@karakeep/db/schema";
 import {
   zCreateImportSessionRequestSchema,
   ZImportSession,
@@ -91,6 +96,94 @@ export class ImportSessionsRepo {
       .update(importSessions)
       .set({ status })
       .where(eq(importSessions.id, id));
+  }
+
+  async archiveCompleted(cutoff: Date): Promise<number> {
+    const sessions = await this.db
+      .select({ id: importSessions.id })
+      .from(importSessions)
+      .where(
+        and(
+          eq(importSessions.status, "completed"),
+          lte(importSessions.completedAt, cutoff),
+        ),
+      );
+
+    // One transaction per session to keep write locks short; a large backlog
+    // (e.g. the first sweep after deploy) shouldn't block other writers.
+    // Each transaction reads before writing, so reserve the writer slot before
+    // taking a WAL snapshot that another connection could invalidate.
+    let archivedCount = 0;
+    for (const session of sessions) {
+      const archived = await withTransaction(
+        this.db,
+        async (tx) => {
+          const statusCounts = await tx
+            .select({
+              status: importStagingBookmarks.status,
+              count: count(),
+            })
+            .from(importStagingBookmarks)
+            .where(eq(importStagingBookmarks.importSessionId, session.id))
+            .groupBy(importStagingBookmarks.status);
+
+          const stats = {
+            totalBookmarks: 0,
+            completedBookmarks: 0,
+            failedBookmarks: 0,
+            pendingBookmarks: 0,
+            processingBookmarks: 0,
+          };
+
+          for (const { status, count: itemCount } of statusCounts) {
+            stats.totalBookmarks += itemCount;
+            switch (status) {
+              case "pending":
+                stats.pendingBookmarks += itemCount;
+                break;
+              case "processing":
+                stats.processingBookmarks += itemCount;
+                break;
+              case "completed":
+                stats.completedBookmarks += itemCount;
+                break;
+              case "failed":
+                stats.failedBookmarks += itemCount;
+                break;
+            }
+          }
+
+          const result = await tx
+            .update(importSessions)
+            .set({ status: "archived", ...stats })
+            .where(
+              and(
+                eq(importSessions.id, session.id),
+                eq(importSessions.status, "completed"),
+              ),
+            );
+
+          if (result.changes === 0) {
+            return false;
+          }
+
+          await tx
+            .delete(importStagingBookmarks)
+            .where(eq(importStagingBookmarks.importSessionId, session.id));
+          await tx
+            .delete(importSessionBookmarks)
+            .where(eq(importSessionBookmarks.importSessionId, session.id));
+          return true;
+        },
+        { behavior: "immediate" },
+      );
+
+      if (archived) {
+        archivedCount++;
+      }
+    }
+
+    return archivedCount;
   }
 
   async getStagingBookmarks(

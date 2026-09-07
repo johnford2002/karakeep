@@ -19,9 +19,10 @@ import {
 import type { ZApiKeyScope } from "@karakeep/shared/types/apiKeys";
 import { API_KEY_FULL_ACCESS_SCOPE } from "@karakeep/shared/types/apiKeys";
 import { BookmarkTypes } from "@karakeep/shared/types/bookmarks";
+import type { ZReaderViewReason } from "@karakeep/shared/types/bookmarks";
 
-function createdAtField() {
-  return timestamp("createdAt", { withTimezone: true })
+function createdAtField(colName = "createdAt") {
+  return timestamp(colName, { withTimezone: true })
     .notNull()
     .$defaultFn(() => new Date());
 }
@@ -30,6 +31,18 @@ function modifiedAtField() {
   return timestamp("modifiedAt", { withTimezone: true })
     .$defaultFn(() => new Date())
     .$onUpdate(() => new Date());
+}
+
+// SQLite distinguishes second- and millisecond-precision timestamp storage
+// (timestamp vs timestamp_ms).  PostgreSQL's `timestamp` already carries
+// sub-second precision, so these are plain aliases kept only so the two
+// schemas stay structurally identical.
+function createdAtMsField() {
+  return createdAtField();
+}
+
+function modifiedAtMsField() {
+  return modifiedAtField();
 }
 
 export const users = pgTable("user", {
@@ -52,6 +65,10 @@ export const users = pgTable("user", {
   bookmarkQuota: integer("bookmarkQuota"),
   storageQuota: integer("storageQuota"),
   browserCrawlingEnabled: boolean("browserCrawlingEnabled"),
+  // Admin-granted plan label (e.g. a collaborator name). While set, Stripe
+  // sync doesn't downgrade the user's entitlements; it's cleared when the
+  // user gets an active Stripe subscription.
+  manualTierName: text("manualTierName"),
 
   // User Settings
   bookmarkClickAction: text("bookmarkClickAction", {
@@ -198,7 +215,16 @@ export const bookmarks = pgTable(
       .notNull()
       .primaryKey()
       .$defaultFn(() => createId()),
-    createdAt: createdAtField(),
+    // The `createdAt` field and the `createdAt` column intentionally don't
+    // match. Re-saving an existing bookmark bumps it back to the top of the
+    // list, so the timestamp everything sorts and filters on is now "when was
+    // this last saved" and lives in the `lastSavedAt` column. It keeps the
+    // `createdAt` field name because that's what the API has always exposed and
+    // what every query already orders by. The immutable "when did this row
+    // first appear" timestamp stays in the original `createdAt` column, and is
+    // exposed to clients as `firstCreatedAt`.
+    dbCreatedAt: createdAtField(),
+    createdAt: createdAtField("lastSavedAt"),
     modifiedAt: modifiedAtField(),
     title: text("title"),
     archived: boolean("archived").notNull().default(false),
@@ -238,17 +264,20 @@ export const bookmarks = pgTable(
     }),
   },
   (b) => [
-    index("bookmarks_userId_idx").on(b.userId),
-    index("bookmarks_createdAt_idx").on(b.createdAt),
+    index("bookmarks_lastSavedAt_idx").on(b.createdAt),
     // Composite indexes for optimized pagination queries
-    index("bookmarks_userId_createdAt_id_idx").on(b.userId, b.createdAt, b.id),
-    index("bookmarks_userId_archived_createdAt_id_idx").on(
+    index("bookmarks_userId_lastSavedAt_id_idx").on(
+      b.userId,
+      b.createdAt,
+      b.id,
+    ),
+    index("bookmarks_userId_archived_lastSavedAt_id_idx").on(
       b.userId,
       b.archived,
       b.createdAt,
       b.id,
     ),
-    index("bookmarks_userId_favourited_createdAt_id_idx").on(
+    index("bookmarks_userId_favourited_lastSavedAt_id_idx").on(
       b.userId,
       b.favourited,
       b.createdAt,
@@ -278,6 +307,12 @@ export const bookmarkLinks = pgTable(
     favicon: text("favicon"),
     htmlContent: text("htmlContent"),
     contentAssetId: text("contentAssetId"),
+    readerViewStatus: text("readerViewStatus", {
+      enum: ["readable", "not_readable", "uncertain", "unavailable"],
+    }),
+    readerViewScore: integer("readerViewScore"),
+    readerViewReasons: jsonb("readerViewReasons").$type<ZReaderViewReason[]>(),
+    readerViewClassifierVersion: integer("readerViewClassifierVersion"),
     crawledAt: timestamp("crawledAt", { withTimezone: true }),
     crawlStatus: text("crawlStatus", {
       enum: ["pending", "failure", "success"],
@@ -287,6 +322,9 @@ export const bookmarkLinks = pgTable(
     videoDownloadStatus: text("videoDownloadStatus", {
       enum: ["pending", "downloading", "success", "failure"],
     }),
+    // When the pre-crawl probe last extracted and stored this link's metadata.
+    // Lets crawl retries skip re-fetching it.
+    probeMetadataAt: timestamp("probeMetadataAt", { withTimezone: true }),
   },
   (bl) => [index("bookmarkLinks_url_idx").on(bl.url)],
 );
@@ -453,7 +491,6 @@ export const bookmarkTags = pgTable(
     unique().on(bt.userId, bt.name),
     unique("bookmarkTags_userId_id_idx").on(bt.userId, bt.id),
     index("bookmarkTags_name_idx").on(bt.name),
-    index("bookmarkTags_userId_idx").on(bt.userId),
     index("bookmarkTags_normalizedName_idx").on(bt.normalizedName),
   ],
 );
@@ -475,8 +512,6 @@ export const tagsOnBookmarks = pgTable(
   },
   (tb) => [
     primaryKey({ columns: [tb.bookmarkId, tb.tagId] }),
-    index("tagsOnBookmarks_tagId_idx").on(tb.tagId),
-    index("tagsOnBookmarks_bookmarkId_idx").on(tb.bookmarkId),
     // Composite index for tag-first queries (when filtering by tagId)
     index("tagsOnBookmarks_tagId_bookmarkId_idx").on(tb.tagId, tb.bookmarkId),
   ],
@@ -535,8 +570,6 @@ export const bookmarksInLists = pgTable(
   },
   (tb) => [
     primaryKey({ columns: [tb.bookmarkId, tb.listId] }),
-    index("bookmarksInLists_bookmarkId_idx").on(tb.bookmarkId),
-    index("bookmarksInLists_listId_idx").on(tb.listId),
     // Composite index for list-first queries (when filtering by listId)
     index("bookmarksInLists_listId_bookmarkId_idx").on(
       tb.listId,
@@ -624,6 +657,47 @@ export const customPrompts = pgTable(
   (bl) => [index("customPrompts_userId_idx").on(bl.userId)],
 );
 
+export const chatSessions = pgTable(
+  "chatSessions",
+  {
+    id: text("id")
+      .notNull()
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    title: text("title").notNull(),
+    userId: text("userId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: createdAtMsField(),
+    modifiedAt: modifiedAtMsField(),
+  },
+  (cs) => [
+    index("chatSessions_userId_idx").on(cs.userId),
+    index("chatSessions_userId_modifiedAt_idx").on(cs.userId, cs.modifiedAt),
+  ],
+);
+
+export const chatMessages = pgTable(
+  "chatMessages",
+  {
+    id: text("id")
+      .notNull()
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    chatId: text("chatId")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["user", "assistant", "toolResult"] }).notNull(),
+    content: text("content").notNull(),
+    metadata: jsonb("metadata").$type<unknown>(),
+    createdAt: createdAtMsField(),
+  },
+  (cm) => [
+    index("chatMessages_chatId_idx").on(cm.chatId),
+    index("chatMessages_chatId_createdAt_idx").on(cm.chatId, cm.createdAt),
+  ],
+);
+
 export const rssFeedsTable = pgTable(
   "rssFeeds",
   {
@@ -690,6 +764,7 @@ export const rssFeedImportsTable = pgTable(
     index("rssFeedImports_feedIdIdx_idx").on(bl.rssFeedId),
     index("rssFeedImports_entryIdIdx_idx").on(bl.entryId),
     unique().on(bl.rssFeedId, bl.entryId),
+    index("rssFeedImports_bookmarkId_idx").on(bl.bookmarkId),
     // Composite index for RSS feed filter queries (when filtering by rssFeedId)
     index("rssFeedImports_rssFeedId_bookmarkId_idx").on(
       bl.rssFeedId,
@@ -872,17 +947,35 @@ export const importSessions = pgTable(
       onDelete: "set null",
     }),
     status: text("status", {
-      enum: ["staging", "pending", "running", "paused", "completed", "failed"],
+      enum: [
+        "staging",
+        "pending",
+        "running",
+        "paused",
+        "completed",
+        "failed",
+        "archived",
+      ],
     })
       .notNull()
       .default("staging"),
     lastProcessedAt: timestamp("lastProcessedAt", { withTimezone: true }),
+    completedAt: timestamp("completedAt", { withTimezone: true }),
+    totalBookmarks: integer("totalBookmarks").notNull().default(0),
+    completedBookmarks: integer("completedBookmarks").notNull().default(0),
+    failedBookmarks: integer("failedBookmarks").notNull().default(0),
+    pendingBookmarks: integer("pendingBookmarks").notNull().default(0),
+    processingBookmarks: integer("processingBookmarks").notNull().default(0),
     createdAt: createdAtField(),
     modifiedAt: modifiedAtField(),
   },
   (is) => [
     index("importSessions_userId_idx").on(is.userId),
     index("importSessions_status_idx").on(is.status),
+    index("importSessions_status_completedAt_idx").on(
+      is.status,
+      is.completedAt,
+    ),
   ],
 );
 
@@ -902,7 +995,6 @@ export const importSessionBookmarks = pgTable(
     createdAt: createdAtField(),
   },
   (isb) => [
-    index("importSessionBookmarks_sessionId_idx").on(isb.importSessionId),
     index("importSessionBookmarks_bookmarkId_idx").on(isb.bookmarkId),
     unique().on(isb.importSessionId, isb.bookmarkId),
   ],
@@ -958,6 +1050,7 @@ export const importStagingBookmarks = pgTable(
       isb.status,
     ),
     index("importStaging_completedAt_idx").on(isb.completedAt),
+    index("importStaging_resultBookmarkId_idx").on(isb.resultBookmarkId),
     index("importStaging_status_idx").on(isb.status),
     index("importStaging_status_processingStartedAt_idx").on(
       isb.status,

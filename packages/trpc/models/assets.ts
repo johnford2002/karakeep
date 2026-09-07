@@ -1,9 +1,10 @@
 import { TRPCError } from "@trpc/server";
+import { withTransaction } from "@karakeep/db";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { assets } from "@karakeep/db/schema";
-import { deleteAsset } from "@karakeep/shared/assetdb";
+import { deleteAsset } from "@karakeep/shared-server";
 import serverConfig from "@karakeep/shared/config";
 import { createSignedToken } from "@karakeep/shared/signedTokens";
 import { zAssetSignedTokenSchema } from "@karakeep/shared/types/assets";
@@ -147,8 +148,8 @@ export class Asset {
       });
     }
 
-    await ctx.db.transaction(async (tx) => {
-      await tx.delete(assets).where(eq(assets.id, input.oldAssetId));
+    await withTransaction(ctx.db, async (tx) => {
+      tx.delete(assets).where(eq(assets.id, input.oldAssetId)).run();
       await tx
         .update(assets)
         .set({

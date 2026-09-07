@@ -26,6 +26,7 @@ import {
   ExpandIcon,
   FileText,
   Info,
+  LayoutPanelTop,
   Loader2,
   Video,
 } from "lucide-react";
@@ -42,6 +43,7 @@ import { READER_FONT_FAMILIES } from "@karakeep/shared/types/readers";
 import { contentRendererRegistry } from "./content-renderers";
 import ReaderSettingsPopover from "./ReaderSettingsPopover";
 import ReaderView from "./ReaderView";
+import SavedPageOverview from "./SavedPageOverview";
 
 function CustomRendererErrorFallback({ error }: { error: Error }) {
   return (
@@ -78,7 +80,7 @@ function FullPageArchiveSection({ link }: { link: ZBookmarkedLink }) {
 
 function ScreenshotSection({ link }: { link: ZBookmarkedLink }) {
   return (
-    <div className="relative h-full min-w-full">
+    <div className="relative h-full min-w-full overflow-y-auto overflow-x-hidden">
       <Image
         alt="screenshot"
         src={`/api/assets/${link.screenshotAssetId}`}
@@ -147,8 +149,17 @@ export default function LinkContentSection({
   const { t } = useTranslation();
   const { settings } = useReaderSettings();
   const availableRenderers = contentRendererRegistry.getRenderers(bookmark);
-  const defaultSection =
-    availableRenderers.length > 0 ? availableRenderers[0].id : "cached";
+  let defaultSection = availableRenderers[0]?.id ?? "cached";
+  if (
+    availableRenderers.length === 0 &&
+    bookmark.content.type === BookmarkTypes.LINK
+  ) {
+    if (bookmark.content.preferredPreview === "screenshot") {
+      defaultSection = "screenshot";
+    } else if (bookmark.content.preferredPreview === "overview") {
+      defaultSection = "overview";
+    }
+  }
   const [section, setSection] = useQueryState("section", {
     defaultValue: defaultSection,
   });
@@ -191,8 +202,12 @@ export default function LinkContentSection({
     content = <VideoSection link={bookmark.content} />;
   } else if (section === "pdf") {
     content = <PDFSection link={bookmark.content} />;
-  } else {
+  } else if (section === "screenshot") {
     content = <ScreenshotSection link={bookmark.content} />;
+  } else {
+    content = (
+      <SavedPageOverview link={bookmark.content} onSelectSection={setSection} />
+    );
   }
 
   return (
@@ -220,7 +235,16 @@ export default function LinkContentSection({
               })}
 
               {/* Default renderers */}
-              <SelectItem value="cached">
+              <SelectItem value="overview">
+                <div className="flex items-center">
+                  <LayoutPanelTop className="mr-2 h-4 w-4" />
+                  {t("preview.page_overview")}
+                </div>
+              </SelectItem>
+              <SelectItem
+                value="cached"
+                disabled={bookmark.content.readerViewStatus === "unavailable"}
+              >
                 <div className="flex items-center">
                   <BookOpen className="mr-2 h-4 w-4" />
                   {t("preview.reader_view")}
@@ -250,7 +274,7 @@ export default function LinkContentSection({
               >
                 <div className="flex items-center">
                   <Archive className="mr-2 h-4 w-4" />
-                  {t("common.archive")}
+                  {t("preview.archived_page")}
                 </div>
               </SelectItem>
               <SelectItem

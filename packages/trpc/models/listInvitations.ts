@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { withTransaction } from "@karakeep/db";
 import { and, eq } from "drizzle-orm";
 
 import { listCollaborators, listInvitations } from "@karakeep/db/schema";
@@ -119,7 +120,7 @@ export class ListInvitation {
       });
     }
 
-    await this.ctx.db.transaction(async (tx) => {
+    await withTransaction(this.ctx.db, async (tx) => {
       await tx
         .delete(listInvitations)
         .where(eq(listInvitations.id, this.invitation.id));

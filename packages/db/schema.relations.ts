@@ -11,6 +11,8 @@ import {
   bookmarkTexts,
   bookmarks,
   bookmarksInLists,
+  chatMessages,
+  chatSessions,
   importSessionBookmarks,
   importSessions,
   invites,
@@ -33,6 +35,7 @@ export const userRelations = relations(users, ({ many, one }) => ({
   bookmarks: many(bookmarks),
   webhooks: many(webhooksTable),
   rules: many(ruleEngineRulesTable),
+  chatSessions: many(chatSessions),
   invites: many(invites),
   subscription: one(subscriptions),
   importSessions: many(importSessions),
@@ -236,6 +239,24 @@ export const passwordResetTokensRelations = relations(
     }),
   }),
 );
+
+export const chatSessionsRelations = relations(
+  chatSessions,
+  ({ one, many }) => ({
+    user: one(users, {
+      fields: [chatSessions.userId],
+      references: [users.id],
+    }),
+    messages: many(chatMessages),
+  }),
+);
+
+export const chatMessagesRelations = relations(chatMessages, ({ one }) => ({
+  chat: one(chatSessions, {
+    fields: [chatMessages.chatId],
+    references: [chatSessions.id],
+  }),
+}));
 
 export const importSessionsRelations = relations(
   importSessions,

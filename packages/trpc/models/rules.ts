@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { db as DONT_USE_DB } from "@karakeep/db";
+import { db as DONT_USE_DB, withTransaction } from "@karakeep/db";
 import {
   ruleEngineActionsTable,
   ruleEngineRulesTable,
@@ -87,7 +87,7 @@ export class RuleEngineRuleModel {
     input: z.infer<typeof zNewRuleEngineRuleSchema>,
   ): Promise<RuleEngineRuleModel> {
     // Similar to lists create, but for rules
-    const insertedRule = await ctx.db.transaction(async (tx) => {
+    const insertedRule = await withTransaction(ctx.db, async (tx) => {
       const [newRule] = await tx
         .insert(ruleEngineRulesTable)
         .values({
@@ -135,7 +135,7 @@ export class RuleEngineRuleModel {
       throw new TRPCError({ code: "BAD_REQUEST", message: "ID mismatch" });
     }
 
-    await this.ctx.db.transaction(async (tx) => {
+    await withTransaction(this.ctx.db, async (tx) => {
       const result = await tx
         .update(ruleEngineRulesTable)
         .set({
