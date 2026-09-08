@@ -819,7 +819,10 @@ describe("Bookmark Routes", () => {
     const originallySavedAt = new Date("2026-01-01T00:00:00.000Z");
     const resavedAt = new Date("2026-01-02T00:00:00.000Z");
 
-    vi.useFakeTimers();
+    // Fake only Date: these tests want to control "now", not run timers, and
+    // faking setTimeout/setInterval stalls postgres-js's internal connection
+    // timers, which hangs every query on the PostgreSQL leg.
+    vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(originallySavedAt);
       const original = await api.createBookmark({
@@ -949,7 +952,10 @@ describe("Bookmark Routes", () => {
     const originallySavedAt = new Date("2026-01-01T00:00:00.000Z");
     const resavedAt = new Date("2026-01-02T00:00:00.000Z");
 
-    vi.useFakeTimers();
+    // Fake only Date: these tests want to control "now", not run timers, and
+    // faking setTimeout/setInterval stalls postgres-js's internal connection
+    // timers, which hangs every query on the PostgreSQL leg.
+    vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(originallySavedAt);
       const original = await api.createBookmark({
@@ -1705,6 +1711,27 @@ describe("Bookmark Routes", () => {
 
       const result = await api.checkUrl({
         url: "https://example.com/page",
+      });
+      expect(result.bookmarkId).toEqual(bookmark.id);
+    });
+
+    test<CustomTestContext>("matches a stored URL that differs only in case", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+      // Stored with an uppercase host. new URL() lowercases the host, so
+      // both sides normalize to the same string and the exact comparison in
+      // checkUrl matches -- but the candidate has to survive the LIKE
+      // prefilter first. An unfolded LIKE is case-sensitive on PostgreSQL,
+      // so this returned null there and a duplicate bookmark was created,
+      // while SQLite matched it.
+      const bookmark = await api.createBookmark({
+        url: "https://EXAMPLE.com/CasePath",
+        type: BookmarkTypes.LINK,
+      });
+
+      const result = await api.checkUrl({
+        url: "https://example.com/CasePath",
       });
       expect(result.bookmarkId).toEqual(bookmark.id);
     });

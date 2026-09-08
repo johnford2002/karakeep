@@ -17,6 +17,7 @@ import serverConfig, { buildPgConnectionString } from "@karakeep/shared/config";
 import logger from "@karakeep/shared/logger";
 
 import { instrumentSqliteDatabase } from "./instrumentation";
+import { applyChangesAlias, PG_CLIENT_TYPES } from "./pgCompat";
 import * as pgSchema from "./schema.pg";
 import * as relations from "./schema.relations";
 import * as sqliteSchema from "./schema.sqlite";
@@ -116,50 +117,14 @@ async function createPostgresDB() {
   // Number.MAX_SAFE_INTEGER).
   const client = pgClient(connectionString, {
     max: serverConfig.database.poolSize,
-    types: {
-      bigint: {
-        to: 20,
-        from: [20],
-        serialize: (val: number) => String(val),
-        parse: (val: string) => Number(val),
-      },
-    },
+    types: PG_CLIENT_TYPES,
   });
   _rawClient = client;
 
-  // The codebase reads `.changes` on Drizzle mutation results (delete/update)
-  // to get the affected row count.  This is a better-sqlite3 convention.
-  // postgres.js uses `.count` instead.  Alias `.changes` on the Result
-  // prototype so all existing call sites work without modification.
-  const probe = await client`SELECT 1`;
+  // Shared with the test harness so the two clients cannot drift; see
+  // ./pgCompat.ts.
+  await applyChangesAlias(client);
   logger.info("[db] PostgreSQL connection established");
-  const ResultProto = Object.getPrototypeOf(probe);
-  if (!("changes" in ResultProto)) {
-    Object.defineProperty(ResultProto, "changes", {
-      get() {
-        return this.count;
-      },
-      configurable: true,
-    });
-  }
-
-  // Verify the .changes patch works on a DML result.  DDL statements
-  // (CREATE TABLE etc.) leave .count as null, so we need an actual
-  // mutation to get a numeric value.
-  // If postgres.js changes its Result class hierarchy, this will fail
-  // immediately at startup rather than producing silent bugs at runtime.
-  await client`CREATE TEMP TABLE IF NOT EXISTS _karakeep_verify(x int)`;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const verify: any = await client`DELETE FROM _karakeep_verify`;
-  await client`DROP TABLE IF EXISTS _karakeep_verify`;
-  if (typeof verify.changes !== "number") {
-    throw new Error(
-      "PostgreSQL .changes compatibility patch failed. " +
-        "This likely means the postgres.js driver version is incompatible. " +
-        `Expected numeric .changes, got ${typeof verify.changes}. ` +
-        "Pin postgres to ~3.4.9 or update the patch in drizzle.ts.",
-    );
-  }
 
   // Eagerly open all pool connections now, during startup, where latency is
   // harmless. postgres.js opens connections lazily, so without this the first

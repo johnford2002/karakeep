@@ -3,15 +3,11 @@
 import tsconfigPaths from "vite-tsconfig-paths";
 import { defineConfig } from "vitest/config";
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [tsconfigPaths({ skip: (dir) => dir === ".claude" })],
   test: {
-    alias: {
-      "@/*": "./*",
-    },
     // Builds the migrated PostgreSQL template when DATABASE_DIALECT=postgresql;
     // a no-op on SQLite.
-    globalSetup: ["../db/testGlobalSetup.ts"],
+    globalSetup: ["./testGlobalSetup.ts"],
   },
 });

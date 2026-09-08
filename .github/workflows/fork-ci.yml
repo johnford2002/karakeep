@@ -68,9 +68,8 @@ jobs:
         working-directory: packages/shared
         run: pnpm test
 
-      - name: TRPC Tests
-        working-directory: packages/trpc
-        run: pnpm test
+      # TRPC and DB suites run in the db-tests matrix below, against both
+      # dialects rather than only SQLite.
 
       - name: Workers Tests
         working-directory: apps/workers
@@ -91,6 +90,63 @@ jobs:
           name: e2e-docker-logs-${{ github.sha }}-${{ github.run_attempt }}
           path: packages/e2e_tests/setup/docker-logs/
           retention-days: 7
+  db-tests:
+    # The suites that touch a database, run against both dialects.
+    #
+    # These used to run on in-memory SQLite only, which cannot see
+    # dialect-specific bugs at all: drizzle's `.run()`/`.all()` exist on the
+    # SQLite query builders but not on postgres-js, and LIKE is
+    # case-insensitive on SQLite but not PostgreSQL. Both classes reached
+    # production. Running the same suites on both dialects is what catches them.
+    name: db-tests (${{ matrix.dialect }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dialect: [sqlite, postgresql]
+
+    services:
+      postgres:
+        # Pinned to the major version production runs.
+        image: postgres:18
+        env:
+          POSTGRES_USER: karakeep
+          POSTGRES_PASSWORD: karakeep
+          POSTGRES_DB: karakeep
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_DIALECT: ${{ matrix.dialect }}
+      # Ignored on the SQLite leg; the suites only read it when the dialect is
+      # postgresql.
+      DATABASE_URL: postgresql://karakeep:karakeep@localhost:5432/karakeep
+      # The app pre-warms this many connections at startup. Tests do not need a
+      # warm pool, and each vitest worker would otherwise open ten sockets.
+      DATABASE_POOL_SIZE: 1
+      NEXTAUTH_SECRET: test-secret
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup
+        uses: ./tooling/github/setup
+
+      - name: DB Tests
+        working-directory: packages/db
+        run: pnpm test
+
+      - name: TRPC Tests
+        working-directory: packages/trpc
+        run: pnpm test
+
   open-api-spec:
     runs-on: ubuntu-latest
     steps:

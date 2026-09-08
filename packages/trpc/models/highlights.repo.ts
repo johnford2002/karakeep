@@ -1,4 +1,4 @@
-import { and, desc, eq, like, lt, lte, or } from "drizzle-orm";
+import { and, desc, eq, lt, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import type { DB } from "@karakeep/db";
@@ -99,9 +99,12 @@ export class HighlightsRepo {
     const results = await this.db.query.highlights.findMany({
       where: and(
         eq(highlights.userId, userId),
+        // Case-folded on both sides: SQLite's LIKE ignores ASCII case but
+        // PostgreSQL's does not, so searching "react" found "React" on SQLite
+        // and missed it on PostgreSQL.
         or(
-          like(highlights.text, searchPattern),
-          like(highlights.note, searchPattern),
+          sql`lower(${highlights.text}) LIKE lower(${searchPattern})`,
+          sql`lower(${highlights.note}) LIKE lower(${searchPattern})`,
         ),
         cursor
           ? or(

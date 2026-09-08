@@ -2,19 +2,24 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { DB } from "../drizzle";
-import { getInMemoryDB } from "../drizzle";
+import { dialect } from "../drizzle";
+import { getTestDb } from "../testing";
 import { config } from "../schema";
 import { withTransaction } from "../transaction";
 
-// These run against SQLite, the dialect that constrains the design: drizzle's
+const isPostgres = dialect === "postgresql";
+
+// This is withTransaction's contract, and it runs against whichever dialect the
+// suite is pointed at. SQLite is the one that constrains the design -- drizzle's
 // own transaction() rejects an async callback on better-sqlite3 >= 12, so
-// withTransaction issues the statements itself. The PostgreSQL branch delegates
-// to postgres-js's native async transaction and needs a live server to cover.
-describe("withTransaction (sqlite)", () => {
+// withTransaction issues BEGIN/COMMIT itself there -- while PostgreSQL delegates
+// to postgres-js's native async transaction. Both must satisfy everything below;
+// the single exception is marked.
+describe(`withTransaction (${dialect})`, () => {
   let db: DB;
 
   beforeEach(async () => {
-    db = (await getInMemoryDB(true)) as DB;
+    db = (await getTestDb(true)) as DB;
   });
 
   async function keys() {
@@ -181,26 +186,34 @@ describe("withTransaction (sqlite)", () => {
     expect(await keys()).toEqual(["a", "b"]);
   });
 
-  it("does not let other work interleave between BEGIN and COMMIT", async () => {
-    let sawPartialState = false;
+  // SQLite only, for two reasons: the probe reads with `.all()`, which exists
+  // only on drizzle's SQLite builders, and the property itself is specific to
+  // better-sqlite3 being one synchronous connection. PostgreSQL pools, so a
+  // concurrent read is expected to run during a transaction -- it just cannot
+  // see the uncommitted rows, which is the database's job, not ours.
+  it.skipIf(isPostgres)(
+    "does not let other work interleave between BEGIN and COMMIT",
+    async () => {
+      let sawPartialState = false;
 
-    const probe = setInterval(() => {
-      // Reading mid-transaction on the same connection would see the partial
-      // write; microtask draining should prevent this timer from ever running
-      // while the transaction is open.
-      const rows = db.select().from(config).all();
-      if (rows.length === 1) {
-        sawPartialState = true;
-      }
-    }, 0);
+      const probe = setInterval(() => {
+        // Reading mid-transaction on the same connection would see the partial
+        // write; microtask draining should prevent this timer from ever running
+        // while the transaction is open.
+        const rows = db.select().from(config).all();
+        if (rows.length === 1) {
+          sawPartialState = true;
+        }
+      }, 0);
 
-    await withTransaction(db, async (tx) => {
-      await tx.insert(config).values({ key: "a", value: "1" });
-      await tx.insert(config).values({ key: "b", value: "2" });
-    });
+      await withTransaction(db, async (tx) => {
+        await tx.insert(config).values({ key: "a", value: "1" });
+        await tx.insert(config).values({ key: "b", value: "2" });
+      });
 
-    clearInterval(probe);
-    expect(sawPartialState).toBe(false);
-    expect(await keys()).toEqual(["a", "b"]);
-  });
+      clearInterval(probe);
+      expect(sawPartialState).toBe(false);
+      expect(await keys()).toEqual(["a", "b"]);
+    },
+  );
 });

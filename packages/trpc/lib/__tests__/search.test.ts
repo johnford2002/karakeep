@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { getInMemoryDB } from "@karakeep/db/drizzle";
+import { getTestDb } from "@karakeep/db/testing";
 import {
   bookmarkAssets,
   bookmarkLinks,
@@ -20,11 +20,21 @@ import { Matcher } from "@karakeep/shared/types/search";
 import { AuthedContext } from "../..";
 import { getBookmarkIdsFromMatcher } from "../search";
 
+/**
+ * getBookmarkIdsFromMatcher promises a set of ids, not an order -- none of its
+ * queries carry an ORDER BY. SQLite happened to return them in rowid order,
+ * which these assertions had baked in; PostgreSQL is free to return any order,
+ * so compare them as sets.
+ */
+function expectIds(actual: string[], expected: string[]) {
+  expect([...actual].sort()).toEqual([...expected].sort());
+}
+
 let mockCtx: AuthedContext;
 let testUserId: string;
 
 beforeEach(async () => {
-  const db = await getInMemoryDB(true);
+  const db = await getTestDb(true);
   testUserId = "test-user";
 
   await db.insert(users).values([
@@ -207,7 +217,7 @@ describe("getBookmarkIdsFromMatcher", () => {
       inverse: false,
     };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b1"]);
+    expectIds(result, ["b1"]);
   });
 
   it("should handle tagName matcher with inverse=true", async () => {
@@ -227,7 +237,7 @@ describe("getBookmarkIdsFromMatcher", () => {
       inverse: false,
     };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b1", "b6"]);
+    expectIds(result, ["b1", "b6"]);
   });
 
   it("should handle listName matcher with inverse=true", async () => {
@@ -292,31 +302,31 @@ describe("getBookmarkIdsFromMatcher", () => {
     };
 
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual([]);
+    expectIds(result, []);
   });
 
   it("should handle archived matcher", async () => {
     const matcher: Matcher = { type: "archived", archived: true };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b2", "b3", "b6"]);
+    expectIds(result, ["b2", "b3", "b6"]);
   });
 
   it("should handle archived matcher archived=false", async () => {
     const matcher: Matcher = { type: "archived", archived: false };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b1", "b4", "b5"]);
+    expectIds(result, ["b1", "b4", "b5"]);
   });
 
   it("should handle favourited matcher", async () => {
     const matcher: Matcher = { type: "favourited", favourited: true };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b2", "b4"]);
+    expectIds(result, ["b2", "b4"]);
   });
 
   it("should handle favourited matcher favourited=false", async () => {
     const matcher: Matcher = { type: "favourited", favourited: false };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b1", "b3", "b5", "b6"]);
+    expectIds(result, ["b1", "b3", "b5", "b6"]);
   });
 
   it("should handle url matcher", async () => {
@@ -326,7 +336,7 @@ describe("getBookmarkIdsFromMatcher", () => {
       inverse: false,
     };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b1", "b4", "b6"]);
+    expectIds(result, ["b1", "b4", "b6"]);
   });
 
   it("should handle url matcher with inverse=true", async () => {
@@ -367,7 +377,7 @@ describe("getBookmarkIdsFromMatcher", () => {
       inverse: false,
     };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b2", "b3", "b4", "b5", "b6"]);
+    expectIds(result, ["b2", "b3", "b4", "b5", "b6"]);
   });
 
   it("should handle dateAfter matcher with inverse=true", async () => {
@@ -377,7 +387,7 @@ describe("getBookmarkIdsFromMatcher", () => {
       inverse: true,
     };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b1"]);
+    expectIds(result, ["b1"]);
   });
 
   it("should handle dateBefore matcher", async () => {
@@ -387,7 +397,7 @@ describe("getBookmarkIdsFromMatcher", () => {
       inverse: false,
     };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b1", "b2"]);
+    expectIds(result, ["b1", "b2"]);
   });
 
   it("should handle type matcher", async () => {
@@ -467,7 +477,7 @@ describe("getBookmarkIdsFromMatcher", () => {
       ],
     };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b2"]);
+    expectIds(result, ["b2"]);
   });
 
   it("should handle OR matcher #1", async () => {
@@ -491,7 +501,7 @@ describe("getBookmarkIdsFromMatcher", () => {
       ],
     };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b4", "b5"]);
+    expectIds(result, ["b4", "b5"]);
   });
 
   it("should handle nested complex matchers", async () => {
@@ -515,7 +525,7 @@ describe("getBookmarkIdsFromMatcher", () => {
       ],
     };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b4"]);
+    expectIds(result, ["b4"]);
   });
 
   it("should handle tagged matcher", async () => {
@@ -527,7 +537,7 @@ describe("getBookmarkIdsFromMatcher", () => {
   it("should handle tagged matcher with tagged=false", async () => {
     const matcher: Matcher = { type: "tagged", tagged: false };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b3"]);
+    expectIds(result, ["b3"]);
   });
 
   it("should handle inlist matcher", async () => {
@@ -539,7 +549,7 @@ describe("getBookmarkIdsFromMatcher", () => {
   it("should handle inlist matcher with inList=false", async () => {
     const matcher: Matcher = { type: "inlist", inList: false };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
-    expect(result).toEqual(["b3"]);
+    expectIds(result, ["b3"]);
   });
 
   it("should handle rssFeedName matcher", async () => {
