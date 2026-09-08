@@ -8,6 +8,44 @@ import { defaultBeforeEach } from "../testUtils";
 beforeEach<CustomTestContext>(defaultBeforeEach(true));
 
 describe("Highlight Routes", () => {
+  test<CustomTestContext>("search matches highlight text and note regardless of case", async ({
+    apiCallers,
+  }) => {
+    const api = apiCallers[0].highlights;
+    const bookmarksApi = apiCallers[0].bookmarks;
+
+    const bookmark = await bookmarksApi.createBookmark({
+      url: "https://example.com/case-search",
+      type: BookmarkTypes.LINK,
+    });
+
+    await api.create({
+      bookmarkId: bookmark.id,
+      startOffset: 0,
+      endOffset: 10,
+      color: "yellow",
+      text: "Something about React hooks",
+      note: null,
+    });
+    await api.create({
+      bookmarkId: bookmark.id,
+      startOffset: 20,
+      endOffset: 30,
+      color: "yellow",
+      text: "unrelated body",
+      note: "a note mentioning REACT",
+    });
+
+    // LIKE ignores ASCII case on SQLite but not on PostgreSQL, so an
+    // unfolded comparison made this search silently case-sensitive on
+    // PostgreSQL only.
+    const lower = await api.search({ text: "react" });
+    expect(lower.highlights).toHaveLength(2);
+
+    const upper = await api.search({ text: "REACT" });
+    expect(upper.highlights).toHaveLength(2);
+  });
+
   test<CustomTestContext>("create highlight", async ({ apiCallers }) => {
     const api = apiCallers[0].highlights;
     const bookmarksApi = apiCallers[0].bookmarks;

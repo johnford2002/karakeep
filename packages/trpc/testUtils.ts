@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 
-import { getInMemoryDB } from "@karakeep/db/drizzle";
+import { getTestDb } from "@karakeep/db/testing";
 import { users } from "@karakeep/db/schema";
 
 import type { Context } from "./index";
@@ -25,7 +25,7 @@ export function getTestQueueMocks() {
 // getInMemoryDB is async in this fork: the dialect factory resolves the
 // driver through dynamic imports, so this stays a promise.
 export async function getTestDB() {
-  return await getInMemoryDB(true);
+  return await getTestDb(true);
 }
 
 export type TestDB = Awaited<ReturnType<typeof getTestDB>>;

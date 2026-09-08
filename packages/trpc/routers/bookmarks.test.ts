@@ -1715,6 +1715,27 @@ describe("Bookmark Routes", () => {
       expect(result.bookmarkId).toEqual(bookmark.id);
     });
 
+    test<CustomTestContext>("matches a stored URL that differs only in case", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+      // Stored with an uppercase host. new URL() lowercases the host, so
+      // both sides normalize to the same string and the exact comparison in
+      // checkUrl matches -- but the candidate has to survive the LIKE
+      // prefilter first. An unfolded LIKE is case-sensitive on PostgreSQL,
+      // so this returned null there and a duplicate bookmark was created,
+      // while SQLite matched it.
+      const bookmark = await api.createBookmark({
+        url: "https://EXAMPLE.com/CasePath",
+        type: BookmarkTypes.LINK,
+      });
+
+      const result = await api.checkUrl({
+        url: "https://example.com/CasePath",
+      });
+      expect(result.bookmarkId).toEqual(bookmark.id);
+    });
+
     test<CustomTestContext>("matches URL ignoring trailing slash", async ({
       apiCallers,
     }) => {

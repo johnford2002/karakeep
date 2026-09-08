@@ -2,7 +2,8 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { DB } from "../drizzle";
-import { dialect, getInMemoryDB } from "../drizzle";
+import { dialect } from "../drizzle";
+import { getTestDb } from "../testing";
 import { config } from "../schema";
 import { withTransaction } from "../transaction";
 
@@ -18,7 +19,7 @@ describe(`withTransaction (${dialect})`, () => {
   let db: DB;
 
   beforeEach(async () => {
-    db = (await getInMemoryDB(true)) as DB;
+    db = (await getTestDb(true)) as DB;
   });
 
   async function keys() {

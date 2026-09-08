@@ -171,25 +171,7 @@ export type KarakeepDBTransaction = Parameters<
   Parameters<DB["transaction"]>[0]
 >[0];
 
-/**
- * A migrated, empty database for a test.
- *
- * Keeps its name and signature from upstream even though it is no longer
- * always in-memory: every test suite calls it, and renaming would add merge
- * conflict surface on each upstream sync for no functional gain.
- *
- * Under DATABASE_DIALECT=postgresql this hands back a real PostgreSQL database
- * instead, so the same suites exercise the dialect that production runs. See
- * ./testDb.ts. It is imported lazily so nothing test-related is pulled into a
- * production bundle.
- */
 export async function getInMemoryDB(runMigrations: boolean) {
-  if (dialect === "postgresql") {
-    const { getTestDatabase } = await import("./testDb");
-    // The template is already migrated, so runMigrations has nothing to do.
-    return (await getTestDatabase()) as unknown as BetterSQLite3Database<FullSchema>;
-  }
-
   const { default: SqliteDatabase } =
     (await import("better-sqlite3")) as unknown as {
       default: new (filename: string | Buffer) => Database.Database;

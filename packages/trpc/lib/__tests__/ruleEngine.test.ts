@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getInMemoryDB } from "@karakeep/db/drizzle";
+import { getTestDb } from "@karakeep/db/testing";
 import {
   bookmarkLinks,
   bookmarkLists,
@@ -87,7 +87,7 @@ describe("RuleEngine", () => {
 
   beforeEach(async () => {
     vi.resetAllMocks();
-    db = await getInMemoryDB(/* runMigrations */ true);
+    db = await getTestDb(/* runMigrations */ true);
 
     // Seed User
     [userId] = (

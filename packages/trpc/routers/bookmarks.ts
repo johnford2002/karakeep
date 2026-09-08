@@ -1,5 +1,5 @@
 import { experimental_trpcMiddleware, TRPCError } from "@trpc/server";
-import { and, eq, gt, inArray, like, lt, or } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -1233,7 +1233,12 @@ export const bookmarksAppRouter = router({
         .where(
           and(
             eq(bookmarks.userId, ctx.user.id),
-            like(bookmarkLinks.url, `${normalizedInput}%`),
+            // Case-folded prefilter. The authoritative check is the exact
+            // normalizeUrl() comparison below, so widening this only costs a
+            // few extra candidate rows -- whereas on PostgreSQL an unfolded
+            // LIKE missed stored URLs that differ only in case and let a
+            // duplicate bookmark be created, which SQLite did not.
+            sql`lower(${bookmarkLinks.url}) LIKE lower(${`${normalizedInput}%`})`,
           ),
         );
 

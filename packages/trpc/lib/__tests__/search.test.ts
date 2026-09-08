@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { getInMemoryDB } from "@karakeep/db/drizzle";
+import { getTestDb } from "@karakeep/db/testing";
 import {
   bookmarkAssets,
   bookmarkLinks,
@@ -34,7 +34,7 @@ let mockCtx: AuthedContext;
 let testUserId: string;
 
 beforeEach(async () => {
-  const db = await getInMemoryDB(true);
+  const db = await getTestDb(true);
   testUserId = "test-user";
 
   await db.insert(users).values([
