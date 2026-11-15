@@ -503,6 +503,36 @@ describe("getBookmarkIdsFromMatcher", () => {
     expect(result.sort()).toEqual(["b3", "b5"]);
   });
 
+  // SQLite's LIKE ignores ASCII case but PostgreSQL's does not, so these
+  // matched on SQLite and found nothing on PostgreSQL before both sides were
+  // case-folded.
+  it("matches title case-insensitively", async () => {
+    const result = await getBookmarkIdsFromMatcher(mockCtx, {
+      type: "title",
+      title: "EXAMPLE",
+      inverse: false,
+    });
+    expectIds(result, ["b1", "b2", "b4", "b6"]);
+  });
+
+  it("excludes title case-insensitively with inverse=true", async () => {
+    const result = await getBookmarkIdsFromMatcher(mockCtx, {
+      type: "title",
+      title: "EXAMPLE",
+      inverse: true,
+    });
+    expectIds(result, ["b3", "b5"]);
+  });
+
+  it("matches url case-insensitively", async () => {
+    const result = await getBookmarkIdsFromMatcher(mockCtx, {
+      type: "url",
+      url: "EXAMPLE.COM",
+      inverse: false,
+    });
+    expectIds(result, ["b1", "b4", "b6"]);
+  });
+
   it("should handle dateAfter matcher", async () => {
     const matcher: Matcher = {
       type: "dateAfter",
