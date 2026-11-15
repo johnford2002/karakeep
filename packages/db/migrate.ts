@@ -1,3 +1,6 @@
+// Must load before @karakeep/shared/config, which parses process.env at import time.
+import "dotenv/config";
+
 import type { migrate as sqliteMigrate } from "drizzle-orm/better-sqlite3/migrator";
 import type { migrate as pgMigrate } from "drizzle-orm/postgres-js/migrator";
 

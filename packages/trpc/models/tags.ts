@@ -131,7 +131,9 @@ export class Tag {
       .groupBy(bookmarkTags.id, bookmarkTags.name)
       .orderBy(
         ...switchCase(sortBy, {
-          name: [asc(bookmarkTags.name)],
+          // lower() rather than COLLATE NOCASE, which PostgreSQL doesn't have.
+          // Same order: NOCASE only folds ASCII, as SQLite's lower() does.
+          name: [asc(sql`lower(${bookmarkTags.name})`)],
           usage: [desc(sql`count`)],
           relevance: [
             desc(sql<number>`

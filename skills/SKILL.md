@@ -15,10 +15,10 @@ metadata:
     requires:
       bins:
         - karakeep
-    homepage: https://karakeep.app
+    homepage: https://karakeep.com
     links:
       repository: https://github.com/karakeep-app/karakeep
-      documentation: https://docs.karakeep.app
+      documentation: https://docs.karakeep.com
     emoji: 📦
     cliHelp: karakeep --help
     install:
@@ -61,6 +61,8 @@ Spaces between conditions mean `and`. Use `and`, `or`, and parentheses for expli
 | `is:archived` | Archived bookmarks | `-is:archived` |
 | `is:tagged` | Bookmarks with at least one tag | `-is:tagged` |
 | `is:inlist` | Bookmarks in at least one list | `is:inlist` |
+| `has:notes` | Bookmarks with a non-empty note | `has:notes` |
+| `has:highlights` | Bookmarks with at least one highlight | `-has:highlights` |
 | `is:link` | Link bookmarks | `is:link` |
 | `is:text` | Text bookmarks | `is:text` |
 | `is:media` | Image or PDF bookmarks | `is:media` |
@@ -83,6 +85,7 @@ Examples:
 is:fav after:2026-01-01 #important
 is:archived and (list:reading or #work)
 -is:tagged or -is:inlist
+has:notes -has:highlights
 machine learning is:fav -is:archived
 ```
 
@@ -121,7 +124,7 @@ The CLI resolves credentials in this order:
 2. `KARAKEEP_API_KEY` and `KARAKEEP_SERVER_ADDR` environment variables.
 3. The persistent config file.
 
-The server address defaults to `https://cloud.karakeep.app`. The API key has no default. Use global options for a one-off command without changing saved config:
+The server address defaults to `https://cloud.karakeep.com`. The API key has no default. Use global options for a one-off command without changing saved config:
 
 ```bash
 karakeep --api-key <key> --server-addr <addr> whoami

@@ -15,10 +15,10 @@ import {
   chatSessions,
   importSessionBookmarks,
   importSessions,
+  inAppSubscriptions,
   invites,
   listCollaborators,
   listInvitations,
-  passwordResetTokens,
   ruleEngineActionsTable,
   ruleEngineRulesTable,
   rssFeedImportsTable,
@@ -38,6 +38,7 @@ export const userRelations = relations(users, ({ many, one }) => ({
   chatSessions: many(chatSessions),
   invites: many(invites),
   subscription: one(subscriptions),
+  inAppSubscription: one(inAppSubscriptions),
   importSessions: many(importSessions),
   listCollaborations: many(listCollaborators),
   backups: many(backupsTable),
@@ -230,11 +231,11 @@ export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
   }),
 }));
 
-export const passwordResetTokensRelations = relations(
-  passwordResetTokens,
+export const inAppSubscriptionsRelations = relations(
+  inAppSubscriptions,
   ({ one }) => ({
     user: one(users, {
-      fields: [passwordResetTokens.userId],
+      fields: [inAppSubscriptions.userId],
       references: [users.id],
     }),
   }),

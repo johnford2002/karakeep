@@ -38,12 +38,13 @@ enum TokenType {
 
 // Rules are in order of priority
 const lexerRules: [RegExp, TokenType][] = [
-  [/^\s+and/i, TokenType.And],
-  [/^\s+or/i, TokenType.Or],
+  // Only whole words are operators, so "android" or "oregon" stay plain text.
+  [/^\s+and(?=\s|$)/i, TokenType.And],
+  [/^\s+or(?=\s|$)/i, TokenType.Or],
 
   [/^#/, TokenType.Hash],
   [
-    /^(is|url|list|after|before|age|feed|title|tag|source):/,
+    /^(is|has|url|list|after|before|age|feed|title|tag|source):/,
     TokenType.Qualifier,
   ],
 
@@ -213,6 +214,27 @@ MATCHER.setPattern(
               text: "",
               matcher: { type: "title", title: ident, inverse: !!minus },
             };
+          case "has:":
+            switch (ident) {
+              case "notes":
+                return {
+                  text: "",
+                  matcher: { type: "hasNotes", hasNotes: !minus },
+                };
+              case "highlights":
+                return {
+                  text: "",
+                  matcher: {
+                    type: "hasHighlights",
+                    hasHighlights: !minus,
+                  },
+                };
+              default:
+                return {
+                  text: (minus?.text ?? "") + qualifier.text + ident,
+                  matcher: undefined,
+                };
+            }
           case "#":
           case "tag:":
             return {
@@ -291,7 +313,17 @@ MATCHER.setPattern(
                 text: "",
                 matcher: {
                   type: "age",
-                  relativeDate: { direction, amount, unit },
+                  relativeDate: {
+                    // "newer" (>=) and "older" (<) are exact complements, so
+                    // negating the qualifier is the same as flipping it.
+                    direction: minus
+                      ? direction === "newer"
+                        ? "older"
+                        : "newer"
+                      : direction,
+                    amount,
+                    unit,
+                  },
                 },
               };
             } catch {

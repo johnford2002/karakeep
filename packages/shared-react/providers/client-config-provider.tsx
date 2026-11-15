@@ -19,6 +19,7 @@ export const DEFAULT_CLIENT_CONFIG: ZClientConfig = {
   },
   crawler: {
     videoDownloadEnabled: false,
+    videoDownloadOnDemand: false,
   },
   chat: {
     enabled: false,
@@ -29,7 +30,14 @@ export const DEFAULT_CLIENT_CONFIG: ZClientConfig = {
   stripe: {
     isConfigured: false,
   },
+  revenueCat: {
+    isConfigured: false,
+    purchasePlatforms: [],
+  },
   legal: {},
+  problemReports: {
+    enabled: false,
+  },
   disableNewReleaseCheck: true,
 };
 
@@ -72,9 +80,17 @@ export function ClientConfigProvider({
         ...DEFAULT_CLIENT_CONFIG.stripe,
         ...value?.stripe,
       },
+      revenueCat: {
+        ...DEFAULT_CLIENT_CONFIG.revenueCat,
+        ...value?.revenueCat,
+      },
       legal: {
         ...DEFAULT_CLIENT_CONFIG.legal,
         ...value?.legal,
+      },
+      problemReports: {
+        ...DEFAULT_CLIENT_CONFIG.problemReports,
+        ...value?.problemReports,
       },
     }),
     [value],

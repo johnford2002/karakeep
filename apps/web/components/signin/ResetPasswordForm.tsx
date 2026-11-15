@@ -14,21 +14,25 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
+import { resetPassword } from "@/lib/auth/client";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation } from "@tanstack/react-query";
-import { TRPCClientError } from "@trpc/client";
 import { AlertCircle, CheckCircle } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { useTRPC } from "@karakeep/shared-react/trpc";
-import { zResetPasswordSchema } from "@karakeep/shared/types/users";
+import {
+  PASSWORD_MIN_LENGTH,
+  zResetPasswordSchema,
+} from "@karakeep/shared/types/users";
+
+import { humanAuthErrors } from "./authFormErrors";
 
 const resetPasswordSchema = z
   .object({
@@ -45,45 +49,44 @@ interface ResetPasswordFormProps {
 }
 
 export default function ResetPasswordForm({ token }: ResetPasswordFormProps) {
-  const api = useTRPC();
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const router = useRouter();
 
   const form = useForm<z.infer<typeof resetPasswordSchema>>({
-    resolver: zodResolver(resetPasswordSchema),
+    resolver: zodResolver(resetPasswordSchema, humanAuthErrors),
+    defaultValues: {
+      newPassword: "",
+      confirmPassword: "",
+    },
   });
 
-  const resetPasswordMutation = useMutation(
-    api.users.resetPassword.mutationOptions(),
-  );
-
   const onSubmit = async (values: z.infer<typeof resetPasswordSchema>) => {
-    try {
-      setErrorMessage("");
-      await resetPasswordMutation.mutateAsync({
-        token,
-        newPassword: values.newPassword,
-      });
-      setIsSuccess(true);
-    } catch (error) {
-      if (error instanceof TRPCClientError) {
-        setErrorMessage(error.message);
-      } else {
-        setErrorMessage("An unexpected error occurred. Please try again.");
-      }
+    setErrorMessage("");
+    const result = await resetPassword({
+      token,
+      newPassword: values.newPassword,
+    });
+    if (!result.ok) {
+      setErrorMessage(
+        result.code === "INVALID_TOKEN"
+          ? "Invalid or expired reset token"
+          : (result.error ?? "An unexpected error occurred. Please try again."),
+      );
+      return;
     }
+    setIsSuccess(true);
   };
 
   return (
     <Card className="w-full">
       <CardHeader className="text-center">
-        <CardTitle className="text-2xl font-bold">
+        <CardTitle className="text-xl font-semibold">
           {isSuccess ? "Password reset successful" : "Reset your password"}
         </CardTitle>
         <CardDescription>
           {isSuccess
-            ? "Your password has been successfully reset. You can now sign in with your new password."
+            ? "You can now sign in with your new password."
             : "Enter your new password below."}
         </CardDescription>
       </CardHeader>
@@ -91,32 +94,29 @@ export default function ResetPasswordForm({ token }: ResetPasswordFormProps) {
         {isSuccess ? (
           <>
             <div className="flex items-center justify-center">
-              <CheckCircle className="h-12 w-12 text-green-600" />
+              <CheckCircle className="size-10 text-green-500" />
             </div>
-            <Alert>
-              <AlertDescription className="text-center">
-                Your password has been successfully reset. You can now sign in
-                with your new password.
-              </AlertDescription>
-            </Alert>
             <ActionButton
               loading={false}
               onClick={() => router.push("/signin")}
               className="w-full"
             >
-              Go to Sign In
+              Go to sign in
             </ActionButton>
           </>
         ) : (
           <>
             <Form {...form}>
               <form
+                noValidate
+                // POST so a submit before hydration doesn't put the password in the URL.
+                method="post"
                 onSubmit={form.handleSubmit(onSubmit)}
                 className="space-y-4"
               >
                 {errorMessage && (
                   <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
+                    <AlertCircle className="size-4" />
                     <AlertDescription>{errorMessage}</AlertDescription>
                   </Alert>
                 )}
@@ -124,16 +124,22 @@ export default function ResetPasswordForm({ token }: ResetPasswordFormProps) {
                 <FormField
                   control={form.control}
                   name="newPassword"
-                  render={({ field }) => (
+                  render={({ field, fieldState }) => (
                     <FormItem>
-                      <FormLabel>New Password</FormLabel>
+                      <FormLabel>New password</FormLabel>
                       <FormControl>
-                        <Input
-                          type="password"
+                        <PasswordInput
+                          autoComplete="new-password"
+                          autoFocus
                           placeholder="Enter your new password"
                           {...field}
                         />
                       </FormControl>
+                      {!fieldState.error && (
+                        <FormDescription>
+                          Use at least {PASSWORD_MIN_LENGTH} characters
+                        </FormDescription>
+                      )}
                       <FormMessage />
                     </FormItem>
                   )}
@@ -144,10 +150,10 @@ export default function ResetPasswordForm({ token }: ResetPasswordFormProps) {
                   name="confirmPassword"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Confirm New Password</FormLabel>
+                      <FormLabel>Confirm new password</FormLabel>
                       <FormControl>
-                        <Input
-                          type="password"
+                        <PasswordInput
+                          autoComplete="new-password"
                           placeholder="Confirm your new password"
                           {...field}
                         />
@@ -162,7 +168,7 @@ export default function ResetPasswordForm({ token }: ResetPasswordFormProps) {
                   loading={form.formState.isSubmitting}
                   className="w-full"
                 >
-                  Reset Password
+                  Reset password
                 </ActionButton>
               </form>
             </Form>
@@ -174,7 +180,7 @@ export default function ResetPasswordForm({ token }: ResetPasswordFormProps) {
                 onClick={() => router.push("/signin")}
                 className="w-full"
               >
-                Back to Sign In
+                Back to sign in
               </ActionButton>
             </div>
           </>

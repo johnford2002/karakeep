@@ -20,13 +20,21 @@ export function jsonTextMentions(column: AnyColumn, needle: string): SQL {
 /**
  * Extracts the domain (hostname) from a URL column, stripping the protocol
  * and path. Works across both SQLite and PostgreSQL.
+ *
+ * Mirrors upstream's inline SQLite expression branch for branch: an http(s)
+ * URL yields everything up to the first `/` after the scheme, and anything
+ * else yields everything up to its first `/`. PostgreSQL has no INSTR, but
+ * split_part returns the whole string when the delimiter is absent, which is
+ * exactly the INSTR(...) = 0 fallthrough.
  */
 export function domainFromUrl(urlColumn: AnyColumn): SQL<string> {
   if (dialect === "postgresql") {
-    // PostgreSQL: use substring with regex to extract host
-    return sql`substring(${urlColumn} from '://([^/]+)')`;
+    return sql`CASE
+      WHEN ${urlColumn} LIKE 'https://%' THEN split_part(substr(${urlColumn}, 9), '/', 1)
+      WHEN ${urlColumn} LIKE 'http://%' THEN split_part(substr(${urlColumn}, 8), '/', 1)
+      ELSE split_part(${urlColumn}, '/', 1)
+    END`;
   }
-  // SQLite: use INSTR/SUBSTR to extract host
   return sql`CASE
     WHEN ${urlColumn} LIKE 'https://%' THEN
       CASE
@@ -43,6 +51,11 @@ export function domainFromUrl(urlColumn: AnyColumn): SQL<string> {
           SUBSTR(${urlColumn}, 8)
       END
     ELSE
-      ${urlColumn}
+      CASE
+        WHEN INSTR(${urlColumn}, '/') > 0 THEN
+          SUBSTR(${urlColumn}, 1, INSTR(${urlColumn}, '/') - 1)
+        ELSE
+          ${urlColumn}
+      END
     END`;
 }

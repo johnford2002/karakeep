@@ -27,6 +27,7 @@ export const zClientConfigSchema = z.object({
   }),
   crawler: z.object({
     videoDownloadEnabled: z.boolean(),
+    videoDownloadOnDemand: z.boolean(),
   }),
   chat: z.object({
     enabled: z.boolean(),
@@ -37,9 +38,16 @@ export const zClientConfigSchema = z.object({
   stripe: z.object({
     isConfigured: z.boolean(),
   }),
+  revenueCat: z.object({
+    isConfigured: z.boolean(),
+    purchasePlatforms: z.array(z.enum(["ios", "android"])),
+  }),
   legal: z.object({
     termsOfServiceUrl: z.string().optional(),
     privacyPolicyUrl: z.string().optional(),
+  }),
+  problemReports: z.object({
+    enabled: z.boolean(),
   }),
   serverVersion: z.string().optional(),
   disableNewReleaseCheck: z.boolean(),

@@ -19,7 +19,8 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/karakeep-app/karakeep-chrome
-  HEADLESS_SHELL_VERSION: 151.0.7922.47
+  # Google Chrome version (amd64); arm64 images use Debian's Chromium.
+  GOOGLE_CHROME_VERSION: 157.0.8103.78
   IMAGE_REVISION: r1
 
 jobs:
@@ -50,19 +51,20 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Build image
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           build-args: |
             BUILD_REVISION=${{ github.sha }}
             BUILD_CREATED=${{ needs.metadata.outputs.created }}
+            GOOGLE_CHROME_VERSION=${{ env.GOOGLE_CHROME_VERSION }}
           context: .
           file: docker/chrome/Dockerfile
           load: true
@@ -95,15 +97,15 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -111,7 +113,7 @@ jobs:
 
       - name: Refuse to overwrite the immutable tag
         env:
-          VERSION_TAG: ${{ env.IMAGE }}:${{ env.HEADLESS_SHELL_VERSION }}-${{ env.IMAGE_REVISION }}
+          VERSION_TAG: ${{ env.IMAGE }}:${{ env.GOOGLE_CHROME_VERSION }}-${{ env.IMAGE_REVISION }}
         run: |
           if docker buildx imagetools inspect "$VERSION_TAG" >/dev/null 2>&1; then
             echo "Refusing to overwrite published image $VERSION_TAG"
@@ -119,16 +121,17 @@ jobs:
           fi
 
       - name: Build and publish architecture image
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           build-args: |
             BUILD_REVISION=${{ github.sha }}
             BUILD_CREATED=${{ needs.metadata.outputs.created }}
+            GOOGLE_CHROME_VERSION=${{ env.GOOGLE_CHROME_VERSION }}
           context: .
           file: docker/chrome/Dockerfile
           platforms: ${{ matrix.platform }}
           push: true
-          tags: ${{ env.IMAGE }}:${{ env.HEADLESS_SHELL_VERSION }}-${{ env.IMAGE_REVISION }}-${{ matrix.suffix }}
+          tags: ${{ env.IMAGE }}:${{ env.GOOGLE_CHROME_VERSION }}-${{ env.IMAGE_REVISION }}-${{ matrix.suffix }}
 
   publish-manifest:
     name: Publish multi-architecture manifest
@@ -145,10 +148,10 @@ jobs:
 
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -158,7 +161,7 @@ jobs:
         env:
           LATEST_TAG: ${{ env.IMAGE }}:latest
           RELEASE_TAG: ${{ env.IMAGE }}:release
-          VERSION_TAG: ${{ env.IMAGE }}:${{ env.HEADLESS_SHELL_VERSION }}-${{ env.IMAGE_REVISION }}
+          VERSION_TAG: ${{ env.IMAGE }}:${{ env.GOOGLE_CHROME_VERSION }}-${{ env.IMAGE_REVISION }}
         run: |
           docker buildx imagetools create \
             --tag "$VERSION_TAG" \
@@ -171,7 +174,7 @@ jobs:
         env:
           LATEST_TAG: ${{ env.IMAGE }}:latest
           RELEASE_TAG: ${{ env.IMAGE }}:release
-          VERSION_TAG: ${{ env.IMAGE }}:${{ env.HEADLESS_SHELL_VERSION }}-${{ env.IMAGE_REVISION }}
+          VERSION_TAG: ${{ env.IMAGE }}:${{ env.GOOGLE_CHROME_VERSION }}-${{ env.IMAGE_REVISION }}
         run: |
           docker buildx imagetools inspect "$VERSION_TAG"
           docker buildx imagetools inspect "$LATEST_TAG"

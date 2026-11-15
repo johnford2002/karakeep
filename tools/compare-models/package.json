@@ -7,7 +7,7 @@
   },
   "scripts": {
     "build": "tsc && chmod +x dist/index.js",
-    "run": "tsx --env-file=./.env src/index.ts",
+    "run": "node --env-file=./.env --import tsx src/index.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "@types/node": "^24",
-    "tsx": "^4.8.1",
-    "typescript": "^5.9"
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
   }
 }

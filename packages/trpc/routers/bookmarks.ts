@@ -42,6 +42,7 @@ import { EnqueueOptions } from "@karakeep/shared/queueing";
 import { getRateLimitClient } from "@karakeep/shared/ratelimiting";
 import { FilterQuery, getSearchClient } from "@karakeep/shared/search";
 import { parseSearchQuery } from "@karakeep/shared/searchQueryParser";
+import { buildSummarizationInput } from "@karakeep/shared/summarization";
 import type {
   ZBookmarkContent,
   ZBookmarkSource,
@@ -375,9 +376,12 @@ export const bookmarksAppRouter = router({
               summary: input.summary,
               createdAt: input.createdAt,
               source: input.source,
-              // Only links currently support summarization. Let's set the status to null for other types for now.
-              summarizationStatus:
-                input.type === BookmarkTypes.LINK ? "pending" : null,
+              // Every type now ends up with a summarization job: links and
+              // texts enqueue one as part of this request, assets once
+              // preprocessing has extracted their text. The asset preprocessing
+              // worker already clears this back to null if it gives up before
+              // enqueueing one.
+              summarizationStatus: "pending",
             })
             .returning();
 
@@ -530,6 +534,13 @@ export const bookmarksAppRouter = router({
               enqueueOpts,
             );
           }
+          await OpenAIQueue.enqueue(
+            {
+              bookmarkId: bookmark.id,
+              type: "summarize",
+            },
+            enqueueOpts,
+          );
           break;
         }
         case BookmarkTypes.ASSET: {
@@ -869,6 +880,116 @@ export const bookmarksAppRouter = router({
         priority: QueuePriority.Low,
         idempotencyKey: buildCrawlIdempotencyKey(payload),
       });
+      await withTransaction(ctx.db, async (tx) => {
+        await tx
+          .update(bookmarkLinks)
+          .set({ crawlStatus: "pending" })
+          .where(eq(bookmarkLinks.id, input.bookmarkId));
+        // Clients poll a bookmark that's still loading, backing off from when
+        // it was last modified, so the bookmark's own row has to change too.
+        await tx
+          .update(bookmarks)
+          .set({ modifiedAt: new Date() })
+          .where(eq(bookmarks.id, input.bookmarkId));
+      });
+    }),
+  // Captures an offline copy (a PDF or a full-page archive) of a link without
+  // recrawling it: the bookmark's content, metadata and crawl status are kept.
+  preserveOfflineCopy: bookmarksProcedure
+    .use(
+      createRateLimitMiddleware({
+        name: "bookmarks.preserveOfflineCopy",
+        windowMs: 30 * 60 * 1000,
+        maxRequests: 200,
+      }),
+    )
+    .input(
+      z.object({
+        bookmarkId: z.string(),
+        kind: z.enum(["fullPageArchive", "pdf"]),
+      }),
+    )
+    .use(ensureBookmarkOwnership)
+    .mutation(async ({ input, ctx }) => {
+      const link = await ctx.db.query.bookmarkLinks.findFirst({
+        where: eq(bookmarkLinks.id, input.bookmarkId),
+        columns: { id: true },
+      });
+      if (!link) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Offline copies can only be preserved for link bookmarks",
+        });
+      }
+      const payload = {
+        bookmarkId: input.bookmarkId,
+        archiveFullPage: input.kind === "fullPageArchive",
+        storePdf: input.kind === "pdf",
+        offlineCopiesOnly: true,
+      };
+      await LowPriorityCrawlerQueue.enqueue(payload, {
+        groupId: ctx.user.id,
+        priority: QueuePriority.Low,
+        idempotencyKey: buildCrawlIdempotencyKey(payload),
+      });
+    }),
+  preserveVideo: bookmarksProcedure
+    .use(
+      createRateLimitMiddleware({
+        name: "bookmarks.preserveVideo",
+        windowMs: 30 * 60 * 1000,
+        maxRequests: 50,
+      }),
+    )
+    .input(
+      z.object({
+        bookmarkId: z.string(),
+      }),
+    )
+    .use(ensureBookmarkOwnership)
+    .mutation(async ({ input, ctx }) => {
+      if (!serverConfig.crawler.downloadVideoOnDemand) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "On-demand video downloads are disabled on this server",
+        });
+      }
+      const link = await ctx.db.query.bookmarkLinks.findFirst({
+        where: eq(bookmarkLinks.id, input.bookmarkId),
+        columns: { url: true },
+      });
+      if (!link) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Videos can only be preserved for link bookmarks",
+        });
+      }
+      // Same as a crawl-triggered download: mark it pending (before enqueueing,
+      // so it can't overwrite the worker's own status) so the video status
+      // indicator shows progress until the worker reaches a terminal state.
+      // Clients back off polling from the bookmark's last modification, so
+      // bump that too, as recrawl does, or an old bookmark is never re-polled.
+      await withTransaction(ctx.db, async (tx) => {
+        await tx
+          .update(bookmarkLinks)
+          .set({ videoDownloadStatus: "pending" })
+          .where(eq(bookmarkLinks.id, input.bookmarkId));
+        await tx
+          .update(bookmarks)
+          .set({ modifiedAt: new Date() })
+          .where(eq(bookmarks.id, input.bookmarkId));
+      });
+      await VideoWorkerQueue.enqueue(
+        {
+          bookmarkId: input.bookmarkId,
+          url: link.url,
+          onDemand: true,
+        },
+        {
+          groupId: ctx.user.id,
+          idempotencyKey: `video:${input.bookmarkId}`,
+        },
+      );
     }),
   updateReadingProgress: bookmarksProcedure
     .input(
@@ -1471,6 +1592,8 @@ export const bookmarksAppRouter = router({
           z.object({
             id: z.string(),
             url: z.string(),
+            title: z.string().nullable(),
+            isCrawling: z.boolean(),
             statusCode: z.number().nullable(),
             isCrawlingFailure: z.boolean(),
             crawledAt: z.date().nullable(),
@@ -1484,6 +1607,8 @@ export const bookmarksAppRouter = router({
         .select({
           id: bookmarkLinks.id,
           url: bookmarkLinks.url,
+          userTitle: bookmarks.title,
+          linkTitle: bookmarkLinks.title,
           crawlStatusCode: bookmarkLinks.crawlStatusCode,
           crawlingStatus: bookmarkLinks.crawlStatus,
           crawledAt: bookmarkLinks.crawledAt,
@@ -1505,6 +1630,8 @@ export const bookmarksAppRouter = router({
         bookmarks: brokenLinkBookmarks.map((b) => ({
           id: b.id,
           url: b.url,
+          title: b.userTitle || b.linkTitle || null,
+          isCrawling: b.crawlingStatus === "pending",
           statusCode: b.crawlStatusCode,
           isCrawlingFailure: b.crawlingStatus === "failure",
           crawledAt: b.crawledAt,
@@ -1544,29 +1671,63 @@ export const bookmarksAppRouter = router({
           message: "No inference client configured",
         });
       }
-      const bookmark = await ctx.db.query.bookmarkLinks.findFirst({
-        where: eq(bookmarkLinks.id, input.bookmarkId),
+      const bookmark = await ctx.db.query.bookmarks.findFirst({
+        where: eq(bookmarks.id, input.bookmarkId),
+        columns: { type: true },
+        with: {
+          link: {
+            columns: {
+              title: true,
+              description: true,
+              htmlContent: true,
+              contentAssetId: true,
+              publisher: true,
+              author: true,
+              url: true,
+            },
+          },
+          text: {
+            columns: {
+              text: true,
+            },
+          },
+          asset: {
+            columns: {
+              content: true,
+              fileName: true,
+            },
+          },
+        },
       });
 
       if (!bookmark) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Bookmark not found or not a link",
+          message: "Bookmark not found",
         });
       }
 
-      const content = await Bookmark.getBookmarkPlainTextContent(
+      // Extracting the plain text content of a link hits the asset store, so
+      // it's only resolved for the bookmark type that needs it.
+      const linkPlainTextContent =
+        bookmark.type === BookmarkTypes.LINK && bookmark.link
+          ? ((await Bookmark.getBookmarkPlainTextContent(
+              bookmark.link,
+              ctx.user.id,
+            )) ?? "")
+          : "";
+
+      const bookmarkDetails = buildSummarizationInput(
         bookmark,
-        ctx.user.id,
+        linkPlainTextContent,
       );
 
-      const bookmarkDetails = `
-Title: ${bookmark.title ?? ""}
-Description: ${bookmark.description ?? ""}
-Content: ${content}
-Publisher: ${bookmark.publisher ?? ""}
-Author: ${bookmark.author ?? ""}
-`;
+      if (!bookmarkDetails) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Nothing to summarize for this bookmark",
+        });
+      }
 
       const prompts = await ctx.db.query.customPrompts.findMany({
         where: and(
@@ -1620,6 +1781,7 @@ Author: ${bookmark.author ?? ""}
         .update(bookmarks)
         .set({
           summary: summary.response,
+          summarizationStatus: "success",
         })
         .where(eq(bookmarks.id, input.bookmarkId));
       await Promise.all([

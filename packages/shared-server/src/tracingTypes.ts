@@ -25,6 +25,9 @@ export type TracingAttributeKey =
   // Crawler-specific attributes
   | "crawler.forceStorePdf"
   | "crawler.archiveFullPage"
+  | "crawler.offlineCopiesOnly"
+  | "crawler.skipScreenshot"
+  | "crawler.skipPdf"
   | "crawler.hasPrecrawledArchive"
   | "crawler.getContentType.statusCode"
   | "crawler.contentType"
@@ -33,6 +36,8 @@ export type TracingAttributeKey =
   | "crawler.cleanup.hasPage"
   | "crawler.cleanup.pageClosed"
   | "crawler.cleanup.contextClosed"
+  | "crawler.challenge.cleared"
+  | "crawler.challenge.waitMs"
   // Database attributes
   | "db.system"
   | "db.statement"

@@ -1,3 +1,5 @@
+import { decode as decodeHtmlEntities } from "html-entities";
+
 import type { ParseSubprocessOutput } from "./parseHtmlSubprocessIpc";
 
 /**
@@ -15,6 +17,7 @@ const CHALLENGE_PAGE_TITLES = new Set([
   // PerimeterX
   "access to this page has been denied",
   "access to this page has been denied.",
+  "robot or human?",
   // Amazon / Bloomberg
   "robot check",
   "are you a robot?",
@@ -59,6 +62,19 @@ const CHALLENGE_PAGE_BODY_MARKERS = [
 const CHALLENGE_PAGE_MAX_HTML_LENGTH = 100_000;
 
 /**
+ * The text of the document's <title>, for when the page isn't parsed. A regex
+ * is enough here: it's only used to match the short, plain titles of
+ * challenge pages.
+ */
+export function extractHtmlTitle(htmlContent: string): string | null {
+  const match = /<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(htmlContent);
+  if (!match) {
+    return null;
+  }
+  return decodeHtmlEntities(match[1]).replace(/\s+/g, " ").trim();
+}
+
+/**
  * Conservative detection of bot-challenge/block pages that are served with an
  * HTTP 200 and would otherwise look like a successful crawl. Prefers false
  * negatives over false positives: exact title matches, plus high-confidence
@@ -79,6 +95,24 @@ export function isLikelyChallengePage({
   }
   const lowered = htmlContent.toLowerCase();
   return CHALLENGE_PAGE_BODY_MARKERS.some((marker) => lowered.includes(marker));
+}
+
+// DataDome's captcha page (as opposed to its self-clearing device check) needs
+// a human to solve it, so there's no point waiting for it to clear.
+const DATADOME_HARD_CAPTCHA = /['"]rt['"]\s*:\s*['"]c['"]/;
+
+/**
+ * Whether the page is a bot challenge that may clear by itself (and reload
+ * into the real page) if the browser keeps waiting.
+ */
+export function isWaitableChallenge(
+  title: string,
+  htmlContent: string,
+): boolean {
+  return (
+    isLikelyChallengePage({ title, htmlContent }) &&
+    !DATADOME_HARD_CAPTCHA.test(htmlContent)
+  );
 }
 
 /**
