@@ -95,8 +95,9 @@ const TABLE_SPECS: TableSpec[] = [
   // ---- auth / user tables ----
   {
     table: "user",
-    timestampMsCols: ["emailVerified"],
+    timestampMsCols: ["createdAt", "updatedAt"],
     boolCols: [
+      "emailVerified",
       "browserCrawlingEnabled",
       "backupsEnabled",
       "autoTaggingEnabled",
@@ -109,19 +110,20 @@ const TABLE_SPECS: TableSpec[] = [
   },
   {
     table: "account",
+    timestampMsCols: [
+      "accessTokenExpiresAt",
+      "refreshTokenExpiresAt",
+      "createdAt",
+      "updatedAt",
+    ],
   },
   {
     table: "session",
-    timestampMsCols: ["expires"],
+    timestampMsCols: ["expiresAt", "createdAt", "updatedAt"],
   },
   {
     table: "verificationToken",
-    timestampMsCols: ["expires"],
-  },
-  {
-    table: "passwordResetToken",
-    timestampMsCols: ["expires"],
-    timestampCols: ["createdAt"],
+    timestampMsCols: ["expiresAt", "createdAt", "updatedAt"],
   },
   {
     table: "apiKey",
@@ -132,7 +134,7 @@ const TABLE_SPECS: TableSpec[] = [
   {
     table: "bookmarks",
     timestampCols: ["createdAt", "modifiedAt"],
-    boolCols: ["archived", "favourited"],
+    boolCols: ["archived", "favourited", "captureVideo"],
   },
   {
     table: "bookmarkLinks",
@@ -231,6 +233,11 @@ const TABLE_SPECS: TableSpec[] = [
     table: "subscriptions",
     timestampCols: ["startDate", "endDate", "createdAt", "modifiedAt"],
     boolCols: ["cancelAtPeriodEnd"],
+  },
+  {
+    table: "inAppSubscriptions",
+    timestampCols: ["startDate", "endDate", "createdAt", "modifiedAt"],
+    boolCols: ["cancelAtPeriodEnd", "billingIssue", "isSandbox"],
   },
 
   // ---- import sessions ----
@@ -437,10 +444,16 @@ async function main(): Promise<void> {
     migrate: typeof pgMigrate;
   };
 
-  const pgDrizzle = drizzle(pg);
-  await migrate(pgDrizzle, {
+  // The migrator gets its own connection. drizzle(client) swaps the client's
+  // timestamp and JSON serializers for pass-throughs, since drizzle encodes
+  // those itself -- and the raw inserts below hand postgres-js Date objects
+  // and parsed JSON, which it can then no longer encode ("The string argument
+  // must be of type string ... Received an instance of Date").
+  const migrationClient = pgClient(connectionString, { max: 1 });
+  await migrate(drizzle(migrationClient), {
     migrationsFolder: path.resolve(__dirname, "../migrations/pg"),
   });
+  await migrationClient.end();
   console.log("Migrations complete.\n");
 
   // Migrate each table in dependency order
