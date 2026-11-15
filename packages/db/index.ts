@@ -4,4 +4,9 @@ export * as schema from "./schema";
 export { isUniqueConstraintError } from "./errors";
 export { serializeOn, withTransaction } from "./transaction";
 export type { TransactionBehavior, TransactionOptions } from "./transaction";
-export { domainFromUrl, jsonTextMentions } from "./sql-helpers";
+export {
+  domainFromUrl,
+  jsonTextMentions,
+  likeIgnoringCase,
+  notLikeIgnoringCase,
+} from "./sql-helpers";

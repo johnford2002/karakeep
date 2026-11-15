@@ -430,7 +430,7 @@ export class User {
 
     const hostExpr = domainFromUrl(bookmarkLinks.url);
     const topDomainExpr = sql<string>`CASE
-      WHEN ${hostExpr} LIKE 'www.%' THEN SUBSTR(${hostExpr}, 5)
+      WHEN lower(${hostExpr}) LIKE 'www.%' THEN SUBSTR(${hostExpr}, 5)
       ELSE ${hostExpr}
     END`;
 

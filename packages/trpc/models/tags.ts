@@ -13,7 +13,11 @@ import {
 import { z } from "zod";
 
 import type { ZAttachedByEnum } from "@karakeep/shared/types/tags";
-import { isUniqueConstraintError, withTransaction } from "@karakeep/db";
+import {
+  isUniqueConstraintError,
+  likeIgnoringCase,
+  withTransaction,
+} from "@karakeep/db";
 import { bookmarkTags, tagsOnBookmarks } from "@karakeep/db/schema";
 import { triggerSearchReindex } from "@karakeep/shared-server";
 import {
@@ -121,7 +125,7 @@ export class Tag {
           // case-sensitive on PostgreSQL only. A leading-wildcard LIKE cannot
           // use an index either way, so lower() costs nothing here.
           opts.nameContains
-            ? sql`lower(${bookmarkTags.name}) LIKE lower(${`%${opts.nameContains}%`})`
+            ? likeIgnoringCase(bookmarkTags.name, `%${opts.nameContains}%`)
             : undefined,
           opts.ids && opts.ids.length > 0
             ? inArray(bookmarkTags.id, opts.ids)
@@ -139,7 +143,7 @@ export class Tag {
             desc(sql<number>`
             CASE
               WHEN lower(${opts.nameContains ?? ""}) = lower(${bookmarkTags.name}) THEN 2
-              WHEN lower(${bookmarkTags.name}) LIKE lower(${opts.nameContains ? opts.nameContains + "%" : ""}) THEN 1
+              WHEN ${likeIgnoringCase(bookmarkTags.name, opts.nameContains ? opts.nameContains + "%" : "")} THEN 1
               ELSE 0
             END`),
             asc(sql<number>`length(${bookmarkTags.name})`),

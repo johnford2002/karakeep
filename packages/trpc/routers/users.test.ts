@@ -15,6 +15,7 @@ import {
   accounts,
   assets,
   AssetTypes,
+  bookmarkLinks,
   bookmarks,
   subscriptions,
   users,
@@ -526,6 +527,33 @@ describe("User Routes", () => {
     // Verify hour/day arrays are properly structured
     expect(stats.bookmarkingActivity.byHour).toHaveLength(24);
     expect(stats.bookmarkingActivity.byDayOfWeek).toHaveLength(7);
+  });
+
+  test<CustomTestContext>("user stats - top domains ignore scheme and www case", async ({
+    db,
+  }) => {
+    const user = await createTestUser(db, {
+      name: "Test User",
+      email: "statsdomains@test.com",
+      password: "pass1234",
+    });
+    const caller = getApiCaller(db, user.id);
+    const bookmark = await caller.bookmarks.createBookmark({
+      url: "https://example.com/a",
+      type: BookmarkTypes.LINK,
+    });
+    // Saving normalizes URLs, so older rows are the only ones cased like this.
+    // SQLite's LIKE ignores case and PostgreSQL's doesn't, which used to turn
+    // this into the domain "HTTPS:" on PostgreSQL.
+    await db
+      .update(bookmarkLinks)
+      .set({ url: "HTTPS://WWW.Example.com/a" })
+      .where(eq(bookmarkLinks.id, bookmark.id));
+
+    const stats = await caller.users.stats();
+    expect(stats.topDomains).toEqual([
+      expect.objectContaining({ domain: "Example.com", count: 1 }),
+    ]);
   });
 
   test<CustomTestContext>("user stats - privacy isolation", async ({ db }) => {

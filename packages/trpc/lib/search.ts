@@ -16,9 +16,9 @@ import {
   or,
   SQL,
   sql,
-  SQLWrapper,
 } from "drizzle-orm";
 
+import { likeIgnoringCase, notLikeIgnoringCase } from "@karakeep/db";
 import {
   bookmarkAssets,
   bookmarkLinks,
@@ -35,17 +35,6 @@ import { Matcher } from "@karakeep/shared/types/search";
 import { toAbsoluteDate } from "@karakeep/shared/utils/relativeDateUtils";
 
 import { AuthedContext } from "..";
-
-// Case-folded on both sides: SQLite's LIKE ignores ASCII case but
-// PostgreSQL's does not, so `title:react` matched "React" on SQLite and missed
-// it on PostgreSQL.
-function like(column: SQLWrapper, pattern: string): SQL {
-  return sql`lower(${column}) LIKE lower(${pattern})`;
-}
-
-function notLike(column: SQLWrapper, pattern: string): SQL {
-  return sql`lower(${column}) NOT LIKE lower(${pattern})`;
-}
 
 // SQLite caps expression depth at 1000 and a flat chain of N ANDs/ORs nests N
 // deep, so combine conditions as a balanced tree (depth log2(N)) instead.
@@ -163,7 +152,7 @@ export async function getBookmarksConditionFromMatcher(
       return eq(bookmarks.archived, matcher.archived);
     }
     case "url": {
-      const comp = matcher.inverse ? notLike : like;
+      const comp = matcher.inverse ? notLikeIgnoringCase : likeIgnoringCase;
       return or(
         exists(
           db
@@ -199,7 +188,7 @@ export async function getBookmarksConditionFromMatcher(
           .where(
             and(
               eq(bookmarkLinks.id, bookmarks.id),
-              like(bookmarkLinks.title, `%${matcher.title}%`),
+              likeIgnoringCase(bookmarkLinks.title, `%${matcher.title}%`),
             ),
           ),
       );
@@ -207,12 +196,15 @@ export async function getBookmarksConditionFromMatcher(
         return and(
           or(
             isNull(bookmarks.title),
-            notLike(bookmarks.title, `%${matcher.title}%`),
+            notLikeIgnoringCase(bookmarks.title, `%${matcher.title}%`),
           ),
           not(linkTitleMatches),
         )!;
       }
-      return or(like(bookmarks.title, `%${matcher.title}%`), linkTitleMatches)!;
+      return or(
+        likeIgnoringCase(bookmarks.title, `%${matcher.title}%`),
+        linkTitleMatches,
+      )!;
     }
     case "favourited": {
       return eq(bookmarks.favourited, matcher.favourited);

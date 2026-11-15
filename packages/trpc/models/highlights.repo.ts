@@ -3,6 +3,7 @@ import { and, desc, eq, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import type { DB } from "@karakeep/db";
+import { likeIgnoringCase } from "@karakeep/db";
 import {
   bookmarkAssets,
   bookmarkLinks,
@@ -98,8 +99,8 @@ export class HighlightsRepo {
         // PostgreSQL's does not, so searching "react" found "React" on SQLite
         // and missed it on PostgreSQL.
         or(
-          sql`lower(${highlights.text}) LIKE lower(${searchPattern})`,
-          sql`lower(${highlights.note}) LIKE lower(${searchPattern})`,
+          likeIgnoringCase(highlights.text, searchPattern),
+          likeIgnoringCase(highlights.note, searchPattern),
         ),
       ),
       cursor,

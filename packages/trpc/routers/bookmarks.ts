@@ -1,5 +1,5 @@
 import { experimental_trpcMiddleware, TRPCError } from "@trpc/server";
-import { and, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, or } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -15,7 +15,7 @@ import {
   userReadingProgress,
   users,
 } from "@karakeep/db/schema";
-import { dialect, withTransaction } from "@karakeep/db";
+import { dialect, likeIgnoringCase, withTransaction } from "@karakeep/db";
 import {
   addLogFields,
   AssetPreprocessingQueue,
@@ -1369,7 +1369,7 @@ export const bookmarksAppRouter = router({
             // few extra candidate rows -- whereas on PostgreSQL an unfolded
             // LIKE missed stored URLs that differ only in case and let a
             // duplicate bookmark be created, which SQLite did not.
-            sql`lower(${bookmarkLinks.url}) LIKE lower(${`${normalizedInput}%`})`,
+            likeIgnoringCase(bookmarkLinks.url, `${normalizedInput}%`),
           ),
         );
 
