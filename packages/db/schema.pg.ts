@@ -1,4 +1,3 @@
-import type { AdapterAccount } from "@auth/core/adapters";
 import { createId } from "@paralleldrive/cuid2";
 import { sql, SQL } from "drizzle-orm";
 import {
@@ -52,22 +51,25 @@ export const users = pgTable("user", {
     .$defaultFn(() => createId()),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
-  emailVerified: timestamp("emailVerified", {
-    withTimezone: true,
-    mode: "date",
-  }),
+  // Nullable and without a SQL default to mirror the SQLite schema, which
+  // can't add those constraints to an existing column without a table rebuild.
+  emailVerified: boolean("emailVerified").$defaultFn(() => false),
   image: text("image"),
-  password: text("password"),
-  salt: text("salt").notNull().default(""),
   role: text("role", { enum: ["admin", "user"] }).default("user"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).$defaultFn(
+    () => new Date(),
+  ),
+  updatedAt: timestamp("updatedAt", { withTimezone: true })
+    .$defaultFn(() => new Date())
+    .$onUpdate(() => new Date()),
 
   // Admin Only Settings
   bookmarkQuota: integer("bookmarkQuota"),
   storageQuota: integer("storageQuota"),
   browserCrawlingEnabled: boolean("browserCrawlingEnabled"),
   // Admin-granted plan label (e.g. a collaborator name). While set, Stripe
-  // sync doesn't downgrade the user's entitlements; it's cleared when the
-  // user gets an active Stripe subscription.
+  // and in-app purchase syncs don't downgrade the user's entitlements; it's
+  // cleared when the user gets an active paid subscription.
   manualTierName: text("manualTierName"),
 
   // User Settings
@@ -120,69 +122,87 @@ export const users = pgTable("user", {
 export const accounts = pgTable(
   "account",
   {
+    id: text("id")
+      .notNull()
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    accountId: text("accountId").notNull(),
+    providerId: text("providerId").notNull(),
     userId: text("userId")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    type: text("type").$type<AdapterAccount["type"]>().notNull(),
-    provider: text("provider").notNull(),
-    providerAccountId: text("providerAccountId").notNull(),
-    refresh_token: text("refresh_token"),
-    access_token: text("access_token"),
-    expires_at: integer("expires_at"),
-    token_type: text("token_type"),
+    accessToken: text("accessToken"),
+    refreshToken: text("refreshToken"),
+    idToken: text("idToken"),
+    accessTokenExpiresAt: timestamp("accessTokenExpiresAt", {
+      withTimezone: true,
+    }),
+    refreshTokenExpiresAt: timestamp("refreshTokenExpiresAt", {
+      withTimezone: true,
+    }),
     scope: text("scope"),
-    id_token: text("id_token"),
-    session_state: text("session_state"),
+    password: text("password"),
+    createdAt: createdAtMsField(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .$defaultFn(() => new Date())
+      .$onUpdate(() => new Date()),
   },
   (account) => [
-    primaryKey({
-      columns: [account.provider, account.providerAccountId],
-    }),
+    unique("accounts_providerId_accountId_unique").on(
+      account.providerId,
+      account.accountId,
+    ),
+    index("accounts_userId_idx").on(account.userId),
   ],
 );
 
-export const sessions = pgTable("session", {
-  sessionToken: text("sessionToken")
-    .notNull()
-    .primaryKey()
-    .$defaultFn(() => createId()),
-  userId: text("userId")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  expires: timestamp("expires", { withTimezone: true, mode: "date" }).notNull(),
-});
-
-export const verificationTokens = pgTable(
-  "verificationToken",
-  {
-    identifier: text("identifier").notNull(),
-    token: text("token").notNull(),
-    expires: timestamp("expires", {
-      withTimezone: true,
-      mode: "date",
-    }).notNull(),
-  },
-  (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })],
-);
-
-export const passwordResetTokens = pgTable(
-  "passwordResetToken",
+export const sessions = pgTable(
+  "session",
   {
     id: text("id")
       .notNull()
       .primaryKey()
       .$defaultFn(() => createId()),
+    token: text("token").notNull().unique(),
     userId: text("userId")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    token: text("token").notNull().unique(),
-    expires: timestamp("expires", {
-      withTimezone: true,
-      mode: "date",
-    }).notNull(),
-    createdAt: createdAtField(),
+    expiresAt: timestamp("expiresAt", { withTimezone: true }).notNull(),
+    ipAddress: text("ipAddress"),
+    userAgent: text("userAgent"),
+    createdAt: createdAtMsField(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .$defaultFn(() => new Date())
+      .$onUpdate(() => new Date()),
   },
-  (prt) => [index("passwordResetTokens_userId_idx").on(prt.userId)],
+  (session) => [index("sessions_userId_idx").on(session.userId)],
+);
+
+export const verificationTokens = pgTable(
+  "verificationToken",
+  {
+    id: text("id")
+      .notNull()
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: timestamp("expiresAt", { withTimezone: true }).notNull(),
+    createdAt: createdAtMsField(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .$defaultFn(() => new Date())
+      .$onUpdate(() => new Date()),
+  },
+  (verification) => [
+    unique("verificationTokens_identifier_value_unique").on(
+      verification.identifier,
+      verification.value,
+    ),
+    index("verificationTokens_identifier_idx").on(verification.identifier),
+  ],
 );
 
 export const apiKeys = pgTable(
@@ -381,7 +401,17 @@ export const assets = pgTable(
   (tb) => [
     index("assets_bookmarkId_idx").on(tb.bookmarkId),
     index("assets_assetType_idx").on(tb.assetType),
-    index("assets_userId_idx").on(tb.userId),
+    // Serves the storage list sorted by size (with id as the tie-break) and
+    // anything that filters by userId alone. assetType and bookmarkId make the
+    // per-user totals, the per-type stats and the "no bookmark" filter covering
+    // scans, so they don't look up every asset in size order.
+    index("assets_userId_size_idx").on(
+      tb.userId,
+      tb.size,
+      tb.id,
+      tb.assetType,
+      tb.bookmarkId,
+    ),
   ],
 );
 
@@ -408,12 +438,20 @@ export const highlights = pgTable(
       .default("yellow")
       .notNull(),
     text: text("text"),
+    prefix: text("prefix"),
+    suffix: text("suffix"),
     note: text("note"),
     createdAt: createdAtField(),
   },
   (tb) => [
     index("highlights_bookmarkId_idx").on(tb.bookmarkId),
-    index("highlights_userId_idx").on(tb.userId),
+    // Lets the paginated highlights list walk the index in order and stop at
+    // the page size, instead of sorting every highlight the user has.
+    index("highlights_userId_createdAt_id_idx").on(
+      tb.userId,
+      tb.createdAt,
+      tb.id,
+    ),
   ],
 );
 
@@ -930,6 +968,33 @@ export const subscriptions = pgTable(
     index("subscriptions_stripeCustomerId_idx").on(s.stripeCustomerId),
   ],
 );
+
+// Subscriptions purchased through the mobile app stores (App Store / Google
+// Play). These are managed by RevenueCat, which is the source of truth; this
+// table mirrors the state of the configured RevenueCat entitlement.
+export const inAppSubscriptions = pgTable("inAppSubscriptions", {
+  id: text("id")
+    .notNull()
+    .primaryKey()
+    .$defaultFn(() => createId()),
+  userId: text("userId")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" })
+    .unique(),
+  // The RevenueCat store identifier (e.g. "app_store", "play_store").
+  store: text("store"),
+  productId: text("productId"),
+  status: text("status", {
+    enum: ["active", "expired"],
+  }).notNull(),
+  cancelAtPeriodEnd: boolean("cancelAtPeriodEnd").notNull().default(false),
+  billingIssue: boolean("billingIssue").notNull().default(false),
+  isSandbox: boolean("isSandbox").notNull().default(false),
+  startDate: timestamp("startDate", { withTimezone: true }),
+  endDate: timestamp("endDate", { withTimezone: true }),
+  createdAt: createdAtField(),
+  modifiedAt: modifiedAtField(),
+});
 
 export const importSessions = pgTable(
   "importSessions",

@@ -11,14 +11,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { sendVerificationEmail } from "@/lib/auth/client";
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, Mail } from "lucide-react";
 
-import { useTRPC } from "@karakeep/shared-react/trpc";
 import { validateRedirectUrl } from "@karakeep/shared/utils/redirectUrl";
 
 export default function CheckEmailPage() {
-  const api = useTRPC();
   const searchParams = useSearchParams();
   const router = useRouter();
   const [message, setMessage] = useState("");
@@ -27,22 +26,26 @@ export default function CheckEmailPage() {
   const redirectUrl =
     validateRedirectUrl(searchParams.get("redirectUrl")) ?? "/";
 
-  const resendEmailMutation = useMutation(
-    api.users.resendVerificationEmail.mutationOptions({
-      onSuccess: () => {
-        setMessage(
-          "A new verification email has been sent to your email address.",
-        );
-      },
-      onError: (error) => {
-        setMessage(error.message || "Failed to resend verification email.");
-      },
-    }),
-  );
+  const resendEmailMutation = useMutation({
+    mutationFn: async (input: { email: string; callbackUrl: string }) => {
+      const result = await sendVerificationEmail(input);
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+    },
+    onSuccess: () => {
+      setMessage(
+        "A new verification email has been sent to your email address.",
+      );
+    },
+    onError: (error) => {
+      setMessage(error.message || "Failed to resend verification email.");
+    },
+  });
 
   const handleResendEmail = () => {
     if (email) {
-      resendEmailMutation.mutate({ email, redirectUrl });
+      resendEmailMutation.mutate({ email, callbackUrl: redirectUrl });
     }
   };
 
@@ -55,8 +58,8 @@ export default function CheckEmailPage() {
       <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12 sm:px-6 lg:px-8">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl font-bold">
-              Invalid Request
+            <CardTitle className="text-xl font-semibold">
+              Invalid request
             </CardTitle>
             <CardDescription>
               No email address provided. Please try signing up again.
@@ -64,7 +67,7 @@ export default function CheckEmailPage() {
           </CardHeader>
           <CardContent>
             <Button onClick={handleBackToSignIn} className="w-full">
-              Back to Sign In
+              Back to sign in
             </Button>
           </CardContent>
         </Card>
@@ -76,7 +79,9 @@ export default function CheckEmailPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12 sm:px-6 lg:px-8">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">Check Your Email</CardTitle>
+          <CardTitle className="text-xl font-semibold">
+            Check your email
+          </CardTitle>
           <CardDescription>
             We&apos;ve sent a verification link to your email address
           </CardDescription>
@@ -114,11 +119,11 @@ export default function CheckEmailPage() {
             >
               {resendEmailMutation.isPending ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                   Sending...
                 </>
               ) : (
-                "Resend Verification Email"
+                "Resend verification email"
               )}
             </Button>
             <Button
@@ -126,7 +131,7 @@ export default function CheckEmailPage() {
               variant="ghost"
               className="w-full"
             >
-              Back to Sign In
+              Back to sign in
             </Button>
           </div>
         </CardContent>

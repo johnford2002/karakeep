@@ -141,6 +141,100 @@ describe("Search Query Parser", () => {
     });
   });
 
+  describe("has queries", () => {
+    test("parses supported values", () => {
+      expect(parseSearchQuery("has:notes")).toEqual({
+        result: "full",
+        text: "",
+        matcher: {
+          type: "hasNotes",
+          hasNotes: true,
+        },
+      });
+      expect(parseSearchQuery("has:highlights")).toEqual({
+        result: "full",
+        text: "",
+        matcher: {
+          type: "hasHighlights",
+          hasHighlights: true,
+        },
+      });
+    });
+
+    test("supports both negation forms", () => {
+      expect(parseSearchQuery("-has:notes")).toEqual({
+        result: "full",
+        text: "",
+        matcher: {
+          type: "hasNotes",
+          hasNotes: false,
+        },
+      });
+      expect(parseSearchQuery("!has:notes")).toEqual({
+        result: "full",
+        text: "",
+        matcher: {
+          type: "hasNotes",
+          hasNotes: false,
+        },
+      });
+      expect(parseSearchQuery("-has:highlights")).toEqual({
+        result: "full",
+        text: "",
+        matcher: {
+          type: "hasHighlights",
+          hasHighlights: false,
+        },
+      });
+      expect(parseSearchQuery("!has:highlights")).toEqual({
+        result: "full",
+        text: "",
+        matcher: {
+          type: "hasHighlights",
+          hasHighlights: false,
+        },
+      });
+    });
+
+    test("preserves unsupported values as pure text", () => {
+      expect(parseSearchQuery("has:attachments")).toEqual({
+        result: "full",
+        text: "has:attachments",
+        matcher: undefined,
+      });
+      expect(parseSearchQuery("-has:attachments")).toEqual({
+        result: "full",
+        text: "-has:attachments",
+        matcher: undefined,
+      });
+    });
+
+    test("composes with AND and OR expressions", () => {
+      expect(parseSearchQuery("has:notes and has:highlights")).toEqual({
+        result: "full",
+        text: "",
+        matcher: {
+          type: "and",
+          matchers: [
+            { type: "hasNotes", hasNotes: true },
+            { type: "hasHighlights", hasHighlights: true },
+          ],
+        },
+      });
+      expect(parseSearchQuery("has:notes or !has:highlights")).toEqual({
+        result: "full",
+        text: "",
+        matcher: {
+          type: "or",
+          matchers: [
+            { type: "hasNotes", hasNotes: true },
+            { type: "hasHighlights", hasHighlights: false },
+          ],
+        },
+      });
+    });
+  });
+
   test("simple string queries", () => {
     expect(parseSearchQuery("url:https://example.com")).toEqual({
       result: "full",
@@ -565,6 +659,30 @@ describe("Search Query Parser", () => {
         },
       },
     });
+    expect(parseSearchQuery("-age:<3d")).toEqual({
+      result: "full",
+      text: "",
+      matcher: {
+        type: "age",
+        relativeDate: {
+          direction: "older",
+          amount: 3,
+          unit: "day",
+        },
+      },
+    });
+    expect(parseSearchQuery("!age:>2y")).toEqual({
+      result: "full",
+      text: "",
+      matcher: {
+        type: "age",
+        relativeDate: {
+          direction: "newer",
+          amount: 2,
+          unit: "year",
+        },
+      },
+    });
   });
 
   test("complex queries", () => {
@@ -702,6 +820,45 @@ describe("Search Query Parser", () => {
             tagName: "my-tag",
             inverse: false,
           },
+        ],
+      },
+    });
+  });
+
+  test("words starting with and/or are not operators", () => {
+    expect(parseSearchQuery("foo android #tag")).toEqual({
+      result: "full",
+      text: "foo android",
+      matcher: {
+        type: "tagName",
+        tagName: "tag",
+        inverse: false,
+      },
+    });
+    expect(parseSearchQuery("is:fav oregon -is:archived")).toEqual({
+      result: "full",
+      text: "oregon",
+      matcher: {
+        type: "and",
+        matchers: [
+          { type: "favourited", favourited: true },
+          { type: "archived", archived: false },
+        ],
+      },
+    });
+    expect(parseSearchQuery("is:fav ORDER")).toEqual({
+      result: "full",
+      text: "ORDER",
+      matcher: { type: "favourited", favourited: true },
+    });
+    expect(parseSearchQuery("is:fav or is:archived")).toEqual({
+      result: "full",
+      text: "",
+      matcher: {
+        type: "or",
+        matchers: [
+          { type: "favourited", favourited: true },
+          { type: "archived", archived: true },
         ],
       },
     });

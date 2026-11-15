@@ -68,6 +68,32 @@ export async function withTransaction<T>(
   return await sqliteTransaction(db, cb, opts?.behavior);
 }
 
+/**
+ * Serializes, for the rest of the current transaction, against every other
+ * transaction that locks the same `key`.
+ *
+ * This is the PostgreSQL stand-in for `{ behavior: "immediate" }`, which
+ * PostgreSQL ignores. Read-check-write transactions (e.g. "this move doesn't
+ * form a cycle") rely on that write lock to stop two of them from both
+ * passing the check; under PostgreSQL's READ COMMITTED both would. A
+ * transaction-scoped advisory lock restores it for just the rows that matter,
+ * and is released on commit or rollback.
+ *
+ * On SQLite it's a no-op: callers must open the transaction with
+ * `{ behavior: "immediate" }`, which already serializes every writer.
+ */
+export async function serializeOn(
+  tx: KarakeepDBTransaction,
+  key: string,
+): Promise<void> {
+  if (dialect !== "postgresql") {
+    return;
+  }
+  await (
+    tx as unknown as { execute: (query: ReturnType<typeof sql>) => unknown }
+  ).execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key}))`);
+}
+
 /** Set while a SQLite transaction is open, to spot genuinely nested calls. */
 const sqliteTxDepth = new AsyncLocalStorage<number>();
 

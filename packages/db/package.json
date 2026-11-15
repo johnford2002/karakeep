@@ -7,7 +7,7 @@
   "main": "index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "migrate": "tsx migrate.ts",
+    "migrate": "node --import tsx migrate.ts",
     "generate:sqlite": "drizzle-kit generate --config=drizzle.config.sqlite.ts",
     "generate:pg": "drizzle-kit generate --config=drizzle.config.pg.ts",
     "generate": "pnpm generate:sqlite && pnpm generate:pg",
@@ -16,26 +16,25 @@
     "format:fix": "oxfmt --ignore-path=../../.gitignore .",
     "lint": "oxlint --ignore-path=../../.gitignore .",
     "lint:fix": "oxlint --ignore-path=../../.gitignore . --fix",
-    "migrate-to-pg": "tsx scripts/migrate-to-pg.ts",
+    "migrate-to-pg": "node --import tsx scripts/migrate-to-pg.ts",
     "test": "vitest"
   },
   "dependencies": {
-    "@auth/core": "^0.27.0",
     "@karakeep/shared": "workspace:*",
     "@opentelemetry/api": "^1.9.0",
     "@paralleldrive/cuid2": "^2.2.2",
     "better-sqlite3": "^13.0.3",
     "dotenv": "^16.4.1",
     "drizzle-kit": "^0.31.10",
-    "drizzle-orm": "^0.45.2",
+    "drizzle-orm": "^0.45.4",
     "postgres": "^3.4.9",
-    "tsx": "^4.8.1"
+    "tsx": "^4.23.13"
   },
   "devDependencies": {
     "@karakeep/tsconfig": "workspace:^0.1.0",
     "@types/better-sqlite3": "^7.6.11",
-    "@vercel/ncc": "^0.38.4",
+    "rolldown": "^1.2.16",
     "vite-tsconfig-paths": "^6.1.1",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.11"
   }
 }

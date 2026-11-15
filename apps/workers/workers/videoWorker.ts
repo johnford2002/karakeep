@@ -1,15 +1,5 @@
 import fs from "fs";
-import * as os from "os";
-import path from "path";
 import { eq } from "drizzle-orm";
-import { execa } from "execa";
-import { workerStatsCounter } from "metrics";
-import {
-  getProxyAgent,
-  resolveValidatedRedirectUrl,
-  selectRunProxies,
-} from "network";
-import { withWorkerEventLog, withWorkerTracing } from "workerTracing";
 
 import { db, withTransaction } from "@karakeep/db";
 import { AssetTypes, bookmarkLinks } from "@karakeep/db/schema";
@@ -30,9 +20,18 @@ import logger from "@karakeep/shared/logger";
 import { DequeuedJob, getQueueClient } from "@karakeep/shared/queueing";
 import { resolveShouldCaptureVideo } from "@karakeep/shared/utils/bookmarkUtils";
 
+import type { VideoDownloader } from "./video/common";
+import { workerStatsCounter } from "../metrics";
+import { selectRunProxies } from "../network";
+import { withWorkerEventLog, withWorkerTracing } from "../workerTracing";
 import { getBookmarkDetails, updateAsset } from "../workerUtils";
+import { deleteVideoFile } from "./video/common";
+import { localVideoDownloader } from "./video/localVideoDownloader";
+import { remoteVideoDownloader } from "./video/remoteVideoDownloader";
 
-const TMP_FOLDER = path.join(os.tmpdir(), "video_downloads");
+const videoDownloader: VideoDownloader = serverConfig.sandbox.url
+  ? remoteVideoDownloader
+  : localVideoDownloader;
 
 type VideoDownloadStatus = "pending" | "downloading" | "success" | "failure";
 
@@ -71,14 +70,26 @@ export class VideoWorker {
         },
         onError: async (job) => {
           workerStatsCounter.labels("video", "failed").inc();
-          if (job.numRetriesLeft == 0) {
-            workerStatsCounter.labels("video", "failed_permanent").inc();
-          }
           const jobId = job.id;
           logger.error(
             `[VideoCrawler][${jobId}] Video Download job failed: ${job.error}`,
           );
-          return Promise.resolve();
+          if (job.numRetriesLeft == 0) {
+            workerStatsCounter.labels("video", "failed_permanent").inc();
+            // runWorker records its own failures, but not ones it can't catch:
+            // a timeout or abort, or a throw before its try block. Without
+            // this the status stays "downloading", so clients poll forever and
+            // the UI hides the retry. Retries keep it as is, since another
+            // attempt is coming.
+            const bookmarkId = job.data?.bookmarkId;
+            if (bookmarkId) {
+              await setVideoDownloadStatus(bookmarkId, "failure").catch((e) =>
+                logger.error(
+                  `[VideoCrawler][${jobId}] Failed to record the video download failure: ${e}`,
+                ),
+              );
+            }
+          }
         },
       },
       {
@@ -91,34 +102,9 @@ export class VideoWorker {
   }
 }
 
-function prepareYtDlpArguments(
-  url: string,
-  proxy: string | undefined,
-  assetPath: string,
-) {
-  // yt-dlp performs its own HTTP requests and can follow redirects that this
-  // process cannot validate. Full SSRF protection depends on an egress proxy or
-  // network policy that blocks internal/private targets.
-  const ytDlpArguments = [url];
-  if (serverConfig.crawler.maxVideoDownloadSize > 0) {
-    ytDlpArguments.push(
-      "-f",
-      `best[filesize<${serverConfig.crawler.maxVideoDownloadSize}M]`,
-    );
-  }
-
-  ytDlpArguments.push(...serverConfig.crawler.ytDlpArguments);
-  ytDlpArguments.push("-o", assetPath);
-  ytDlpArguments.push("--no-playlist");
-  if (proxy) {
-    ytDlpArguments.push("--proxy", proxy);
-  }
-  return ytDlpArguments;
-}
-
 async function runWorker(job: DequeuedJob<ZVideoRequest>) {
   const jobId = job.id;
-  const { bookmarkId } = job.data;
+  const { bookmarkId, onDemand } = job.data;
   addLogFields<"videoWorker.run">({ "bookmark.id": bookmarkId });
 
   const {
@@ -128,9 +114,16 @@ async function runWorker(job: DequeuedJob<ZVideoRequest>) {
     videoAssetId: oldVideoAssetId,
   } = await getBookmarkDetails(bookmarkId);
 
-  if (
-    !resolveShouldCaptureVideo(captureVideo, serverConfig.crawler.downloadVideo)
-  ) {
+  // On-demand requests come from the user explicitly asking for this video, so
+  // only the server-wide on-demand switch applies. Crawl-triggered downloads
+  // honour the bookmark's own captureVideo override over the server default.
+  const downloadEnabled = onDemand
+    ? serverConfig.crawler.downloadVideoOnDemand
+    : resolveShouldCaptureVideo(
+        captureVideo,
+        serverConfig.crawler.downloadVideo,
+      );
+  if (!downloadEnabled) {
     logger.info(
       `[VideoCrawler][${jobId}] Skipping video download from "${url}", because it is disabled.`,
     );
@@ -140,79 +133,29 @@ async function runWorker(job: DequeuedJob<ZVideoRequest>) {
 
   await setVideoDownloadStatus(bookmarkId, "downloading");
 
-  const runProxy = selectRunProxies();
-  let normalizedUrl: string;
-  try {
-    const resolvedUrl = await resolveValidatedRedirectUrl(
-      url,
-      { signal: job.abortSignal },
-      runProxy,
-    );
-    normalizedUrl = resolvedUrl.toString();
-  } catch (error) {
-    logger.warn(
-      `[VideoCrawler][${jobId}] Skipping video download for "${url}": ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+  const videoAssetId = newAssetId();
+  const result = await videoDownloader.download({
+    jobId,
+    url,
+    runProxy: selectRunProxies(),
+    assetId: videoAssetId,
+    abortSignal: job.abortSignal,
+  });
+  if (result.status === "skipped") {
+    logger.info(
+      `[VideoCrawler][${jobId}] Skipping video download from "${url}": ${result.reason}`,
     );
     await setVideoDownloadStatus(bookmarkId, null);
     return;
   }
-
-  const videoAssetId = newAssetId();
-  let assetPath = `${TMP_FOLDER}/${videoAssetId}`;
-  await fs.promises.mkdir(TMP_FOLDER, { recursive: true });
-
-  const proxy = getProxyAgent(normalizedUrl, runProxy);
-  const ytDlpArguments = prepareYtDlpArguments(
-    normalizedUrl,
-    proxy?.proxy.toString(),
-    assetPath,
-  );
-
-  try {
-    logger.info(
-      `[VideoCrawler][${jobId}] Attempting to download a file from "${normalizedUrl}" to "${assetPath}" using the following arguments: "${ytDlpArguments}"`,
+  if (result.status === "failed") {
+    logger.error(
+      `[VideoCrawler][${jobId}] Failed to download a video from "${url}": ${result.reason}`,
     );
-
-    await execa("yt-dlp", ytDlpArguments, {
-      cancelSignal: job.abortSignal,
-    });
-    const downloadPath = await findAssetFile(videoAssetId);
-    if (!downloadPath) {
-      logger.info(
-        "[VideoCrawler][${jobId}] yt-dlp didn't download anything. Skipping ...",
-      );
-      await setVideoDownloadStatus(bookmarkId, null);
-      return;
-    }
-    assetPath = downloadPath;
-  } catch (e) {
-    const err = e as Error;
-    if (
-      err.message.includes("ERROR: Unsupported URL:") ||
-      err.message.includes("No media found")
-    ) {
-      logger.info(
-        `[VideoCrawler][${jobId}] Skipping video download from "${normalizedUrl}", because it's not one of the supported yt-dlp URLs`,
-      );
-      await setVideoDownloadStatus(bookmarkId, null);
-      return;
-    }
-    const genericError = `[VideoCrawler][${jobId}] Failed to download a file from "${normalizedUrl}" to "${assetPath}"`;
-    if ("stderr" in err) {
-      logger.error(`${genericError}: ${err.stderr}`);
-    } else {
-      logger.error(genericError);
-    }
-    await deleteLeftOverAssetFile(jobId, videoAssetId);
     await setVideoDownloadStatus(bookmarkId, "failure");
     return;
   }
-
-  logger.info(
-    `[VideoCrawler][${jobId}] Finished downloading a file from "${normalizedUrl}" to "${assetPath}"`,
-  );
+  const assetPath = result.path;
 
   // Get file size and check quota before saving
   const stats = await fs.promises.stat(assetPath);
@@ -251,66 +194,18 @@ async function runWorker(job: DequeuedJob<ZVideoRequest>) {
     await setVideoDownloadStatus(bookmarkId, "success");
 
     logger.info(
-      `[VideoCrawler][${jobId}] Finished downloading video from "${normalizedUrl}" and adding it to the database`,
+      `[VideoCrawler][${jobId}] Finished downloading video from "${url}" and adding it to the database`,
     );
   } catch (error) {
     if (error instanceof StorageQuotaError) {
       logger.warn(
         `[VideoCrawler][${jobId}] Skipping video storage due to quota exceeded: ${error.message}`,
       );
-      await deleteLeftOverAssetFile(jobId, videoAssetId);
+      await deleteVideoFile(jobId, videoAssetId);
       await setVideoDownloadStatus(bookmarkId, "failure");
       return;
     }
     await setVideoDownloadStatus(bookmarkId, "failure");
     throw error;
   }
-}
-
-/**
- * Deletes leftover assets in case the download fails
- *
- * @param jobId the id of the job
- * @param assetId the id of the asset to delete
- */
-async function deleteLeftOverAssetFile(
-  jobId: string,
-  assetId: string,
-): Promise<void> {
-  let assetFile;
-  try {
-    assetFile = await findAssetFile(assetId);
-  } catch {
-    // ignore exception, no asset file was found
-    return;
-  }
-  if (!assetFile) {
-    return;
-  }
-  logger.info(
-    `[VideoCrawler][${jobId}] Deleting leftover video asset "${assetFile}".`,
-  );
-  try {
-    await fs.promises.rm(assetFile);
-  } catch {
-    logger.error(
-      `[VideoCrawler][${jobId}] Failed deleting leftover video asset "${assetFile}".`,
-    );
-  }
-}
-
-/**
- * yt-dlp automatically adds a file ending to the passed in filename --> we have to search it again in the folder
- *
- * @param assetId the id of the asset to search
- * @returns the path to the downloaded asset
- */
-async function findAssetFile(assetId: string): Promise<string | null> {
-  const files = await fs.promises.readdir(TMP_FOLDER);
-  for (const file of files) {
-    if (file.startsWith(assetId)) {
-      return path.join(TMP_FOLDER, file);
-    }
-  }
-  return null;
 }

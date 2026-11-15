@@ -9,6 +9,7 @@ import {
   bookmarksInLists,
   bookmarkTags,
   bookmarkTexts,
+  highlights,
   rssFeedImportsTable,
   rssFeedsTable,
   tagsOnBookmarks,
@@ -44,6 +45,12 @@ beforeEach(async () => {
       email: "test@example.com",
       role: "user",
     },
+    {
+      id: "other-user",
+      name: "Other User",
+      email: "other@example.com",
+      role: "user",
+    },
   ]);
 
   // Setup test data
@@ -56,6 +63,7 @@ beforeEach(async () => {
       favourited: false,
       createdAt: new Date("2024-01-01"),
       title: null,
+      note: "A bookmark note",
     },
     {
       id: "b2",
@@ -63,8 +71,9 @@ beforeEach(async () => {
       userId: testUserId,
       archived: true,
       favourited: true,
-      createdAt: new Date("2024-01-02"),
+      createdAt: new Date("2024-01-02T10:00:00Z"),
       title: "example domain page",
+      note: "",
     },
     {
       id: "b3",
@@ -102,6 +111,16 @@ beforeEach(async () => {
       createdAt: new Date("2024-01-06"),
       title: "example asset",
     },
+    {
+      id: "b7",
+      type: BookmarkTypes.TEXT,
+      userId: "other-user",
+      archived: false,
+      favourited: false,
+      createdAt: new Date("2024-01-07"),
+      title: "another user's bookmark",
+      note: "Another user's note",
+    },
   ]);
 
   await db.insert(bookmarkLinks).values([
@@ -130,6 +149,25 @@ beforeEach(async () => {
       fileName: "test.png",
       assetId: "asset-id",
       sourceUrl: "https://example.com/image.png",
+    },
+  ]);
+
+  await db.insert(highlights).values([
+    {
+      id: "h1",
+      bookmarkId: "b3",
+      userId: testUserId,
+      startOffset: 0,
+      endOffset: 4,
+      text: "This",
+    },
+    {
+      id: "h2",
+      bookmarkId: "b4",
+      userId: "other-user",
+      startOffset: 0,
+      endOffset: 7,
+      text: "Another",
     },
   ]);
 
@@ -305,6 +343,71 @@ describe("getBookmarkIdsFromMatcher", () => {
     expectIds(result, []);
   });
 
+  it("should handle listName matcher referencing a smart list", async () => {
+    await mockCtx.db.insert(bookmarkLists).values({
+      id: "l5",
+      userId: testUserId,
+      name: "pages",
+      icon: "🚀",
+      type: "smart",
+      query: "title:page",
+    });
+
+    const result = await getBookmarkIdsFromMatcher(mockCtx, {
+      type: "listName",
+      listName: "pages",
+      inverse: false,
+    });
+    expect(result.sort()).toEqual(["b2", "b4"]);
+
+    // b1 has a NULL title, which must still be excluded from the smart list
+    // (and hence included in the inverse).
+    const inverseResult = await getBookmarkIdsFromMatcher(mockCtx, {
+      type: "listName",
+      listName: "pages",
+      inverse: true,
+    });
+    expect(inverseResult.sort()).toEqual(["b1", "b3", "b5", "b6"]);
+  });
+
+  it("should handle a smart list that references itself", async () => {
+    await mockCtx.db.insert(bookmarkLists).values({
+      id: "l5",
+      userId: testUserId,
+      name: "loop",
+      icon: "🚀",
+      type: "smart",
+      query: "list:loop or is:fav",
+    });
+
+    const result = await getBookmarkIdsFromMatcher(mockCtx, {
+      type: "listName",
+      listName: "loop",
+      inverse: false,
+    });
+    expect(result.sort()).toEqual(["b2", "b4"]);
+  });
+
+  it("should handle AND/OR matchers beyond SQLite's expression depth limit", async () => {
+    const orResult = await getBookmarkIdsFromMatcher(mockCtx, {
+      type: "or",
+      matchers: Array.from({ length: 2000 }, () => ({
+        type: "favourited" as const,
+        favourited: true,
+      })),
+    });
+    expect(orResult.sort()).toEqual(["b2", "b4"]);
+
+    const andResult = await getBookmarkIdsFromMatcher(mockCtx, {
+      type: "and",
+      matchers: Array.from({ length: 2000 }, () => ({
+        type: "archived" as const,
+        archived: true,
+      })),
+    });
+    expect(andResult.sort()).toEqual(["b2", "b3", "b6"]);
+  });
+
   it("should handle archived matcher", async () => {
     const matcher: Matcher = { type: "archived", archived: true };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
@@ -327,6 +430,36 @@ describe("getBookmarkIdsFromMatcher", () => {
     const matcher: Matcher = { type: "favourited", favourited: false };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
     expectIds(result, ["b1", "b3", "b5", "b6"]);
+  });
+
+  it("should handle hasNotes matcher", async () => {
+    const matcher: Matcher = { type: "hasNotes", hasNotes: true };
+    const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
+    expect(result).toEqual(["b1"]);
+  });
+
+  it("should handle hasNotes matcher with hasNotes=false", async () => {
+    const matcher: Matcher = { type: "hasNotes", hasNotes: false };
+    const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
+    expect(result.sort()).toEqual(["b2", "b3", "b4", "b5", "b6"]);
+  });
+
+  it("should handle hasHighlights matcher for the current user", async () => {
+    const matcher: Matcher = {
+      type: "hasHighlights",
+      hasHighlights: true,
+    };
+    const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
+    expect(result).toEqual(["b3"]);
+  });
+
+  it("should handle hasHighlights=false and ignore another user's highlights", async () => {
+    const matcher: Matcher = {
+      type: "hasHighlights",
+      hasHighlights: false,
+    };
+    const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
+    expect(result.sort()).toEqual(["b1", "b2", "b4", "b5", "b6"]);
   });
 
   it("should handle url matcher", async () => {
@@ -368,6 +501,36 @@ describe("getBookmarkIdsFromMatcher", () => {
     };
     const result = await getBookmarkIdsFromMatcher(mockCtx, matcher);
     expect(result.sort()).toEqual(["b3", "b5"]);
+  });
+
+  // SQLite's LIKE ignores ASCII case but PostgreSQL's does not, so these
+  // matched on SQLite and found nothing on PostgreSQL before both sides were
+  // case-folded.
+  it("matches title case-insensitively", async () => {
+    const result = await getBookmarkIdsFromMatcher(mockCtx, {
+      type: "title",
+      title: "EXAMPLE",
+      inverse: false,
+    });
+    expectIds(result, ["b1", "b2", "b4", "b6"]);
+  });
+
+  it("excludes title case-insensitively with inverse=true", async () => {
+    const result = await getBookmarkIdsFromMatcher(mockCtx, {
+      type: "title",
+      title: "EXAMPLE",
+      inverse: true,
+    });
+    expectIds(result, ["b3", "b5"]);
+  });
+
+  it("matches url case-insensitively", async () => {
+    const result = await getBookmarkIdsFromMatcher(mockCtx, {
+      type: "url",
+      url: "EXAMPLE.COM",
+      inverse: false,
+    });
+    expectIds(result, ["b1", "b4", "b6"]);
   });
 
   it("should handle dateAfter matcher", async () => {

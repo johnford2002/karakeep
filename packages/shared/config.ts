@@ -16,21 +16,6 @@ const optionalStringBool = () =>
     .transform((s) => s === "true")
     .optional();
 
-// Only asymmetric algorithms are supported here because ID tokens are verified
-// against the provider's JWKS. Do not add "none" or symmetric HS* algorithms.
-const oauthIdTokenSignedResponseAlg = z.enum([
-  "RS256",
-  "RS384",
-  "RS512",
-  "PS256",
-  "PS384",
-  "PS512",
-  "ES256",
-  "ES384",
-  "ES512",
-  "EdDSA",
-]);
-
 const allEnv = z.object({
   PORT: z.coerce.number().default(3000),
   WORKERS_HOST: z.string().default("127.0.0.1"),
@@ -60,6 +45,15 @@ const allEnv = z.object({
     .prefault("http://localhost:3000")
     .transform((s) => s.replace(/\/+$/, "")),
   NEXTAUTH_SECRET: z.string().optional(),
+  AUTH_TRUSTED_ORIGINS: z
+    .string()
+    .default("*")
+    .transform((val) =>
+      val
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean),
+    ),
   DISABLE_SIGNUPS: stringBool("false"),
   DISABLE_PASSWORD_AUTH: stringBool("false"),
   OAUTH_AUTO_REDIRECT: stringBool("false"),
@@ -67,9 +61,10 @@ const allEnv = z.object({
   OAUTH_WELLKNOWN_URL: z.string().url().optional(),
   OAUTH_CLIENT_SECRET: z.string().optional(),
   OAUTH_CLIENT_ID: z.string().optional(),
-  OAUTH_ID_TOKEN_SIGNED_RESPONSE_ALG: oauthIdTokenSignedResponseAlg.optional(),
-  OAUTH_TIMEOUT: z.coerce.number().optional().default(3500),
   OAUTH_SCOPE: z.string().default("openid email profile"),
+  OAUTH_TOKEN_ENDPOINT_AUTH_METHOD: z
+    .enum(["client_secret_basic", "client_secret_post"])
+    .default("client_secret_basic"),
   OAUTH_PROVIDER_NAME: z.string().default("Custom Provider"),
   TURNSTILE_SITE_KEY: z.string().optional(),
   TURNSTILE_SECRET_KEY: z.string().optional(),
@@ -90,7 +85,7 @@ const allEnv = z.object({
   SEMANTIC_SEARCH_ENABLED: stringBool("true"),
   INFERENCE_JOB_TIMEOUT_SEC: z.coerce.number().default(30),
   INFERENCE_FETCH_TIMEOUT_SEC: z.coerce.number().default(300),
-  INFERENCE_TEXT_MODEL: z.string().default("gpt-5.6-luna"),
+  INFERENCE_TEXT_MODEL: z.string().default("gpt-6-luna"),
   INFERENCE_IMAGE_MODEL: z.string().default("gpt-4o-mini"),
   EMBEDDING_ENABLE_AUTO_INDEXING: optionalStringBool(),
   EMBEDDING_OPENAI_API_KEY: z.string().optional(),
@@ -128,22 +123,40 @@ const allEnv = z.object({
   BROWSER_COOKIE_PATH: z.string().optional(),
   CRAWLER_JOB_TIMEOUT_SEC: z.coerce.number().default(60),
   CRAWLER_NAVIGATE_TIMEOUT_SEC: z.coerce.number().default(30),
+  CRAWLER_CHALLENGE_WAIT_SEC: z.coerce.number().default(15),
+  CRAWLER_BROWSER_TIMEZONE: z
+    .string()
+    .refine(
+      (tz) => {
+        try {
+          new Intl.DateTimeFormat("en-US", { timeZone: tz });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { message: "must be a valid IANA timezone (e.g. America/New_York)" },
+    )
+    .optional(),
   CRAWLER_NUM_WORKERS: z.coerce.number().default(1),
   INFERENCE_NUM_WORKERS: z.coerce.number().default(1),
-  SEARCH_NUM_WORKERS: z.coerce.number().default(1),
+  SEARCH_NUM_WORKERS: z.coerce.number().default(50),
   SEARCH_JOB_TIMEOUT_SEC: z.coerce.number().default(30),
   WEBHOOK_NUM_WORKERS: z.coerce.number().default(1),
   ASSET_PREPROCESSING_NUM_WORKERS: z.coerce.number().default(1),
   ASSET_PREPROCESSING_JOB_TIMEOUT_SEC: z.coerce.number().default(60),
+  ASSET_PREPROCESSING_PDF_PARSER_MEM_LIMIT_MB: z.coerce.number().default(1024),
   RULE_ENGINE_NUM_WORKERS: z.coerce.number().default(1),
   CRAWLER_DOWNLOAD_BANNER_IMAGE: stringBool("true"),
   CRAWLER_STORE_SCREENSHOT: stringBool("true"),
   CRAWLER_FULL_PAGE_SCREENSHOT: stringBool("false"),
   CRAWLER_STORE_PDF: stringBool("false"),
   CRAWLER_FULL_PAGE_ARCHIVE: stringBool("false"),
+  CRAWLER_FULL_PAGE_ARCHIVE_MAX_SIZE_MB: z.coerce.number().default(0),
   CRAWLER_VIDEO_DOWNLOAD: stringBool("false"),
   CRAWLER_VIDEO_DOWNLOAD_MAX_SIZE: z.coerce.number().default(50),
   CRAWLER_VIDEO_DOWNLOAD_TIMEOUT_SEC: z.coerce.number().default(10 * 60),
+  CRAWLER_VIDEO_DOWNLOAD_ON_DEMAND: optionalStringBool(),
   CRAWLER_ENABLE_ADBLOCKER: stringBool("true"),
   CRAWLER_ENABLE_AUTOCONSENT: stringBool("true"),
   CRAWLER_YTDLP_ARGS: z
@@ -162,9 +175,20 @@ const allEnv = z.object({
   CRAWLER_DOMAIN_RATE_LIMIT_WINDOW_MS: z.coerce.number().min(1).optional(),
   CRAWLER_DOMAIN_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().min(1).optional(),
   CRAWLER_PREFLIGHT_USER_AGENT: z.string().optional(),
+  SANDBOX_REMOTE_SERVER_ENABLED: stringBool("false"),
+  SANDBOX_REMOTE_URL: z.string().url().optional(),
+  SANDBOX_REMOTE_TOKEN: z
+    .string()
+    // It's sent as a bearer token, so it must use the bearer token alphabet.
+    .regex(
+      /^[A-Za-z0-9._~+/-]+=*$/,
+      "SANDBOX_REMOTE_TOKEN can only contain letters, digits and . _ ~ + / - (optionally followed by =)",
+    )
+    .optional(),
   LOG_LEVEL: z.string().default("debug"),
   DB_QUERY_LOGGING: stringBool("false"),
-  NO_COLOR: stringBool("false"),
+  // https://no-color.org/: any nonempty value disables colors.
+  NO_COLOR: z.string().optional().transform(Boolean),
   DEMO_MODE: stringBool("false"),
   DEMO_MODE_EMAIL: z.string().optional(),
   DEMO_MODE_PASSWORD: z.string().optional(),
@@ -200,6 +224,9 @@ const allEnv = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
   SMTP_FROM: z.string().optional(),
+
+  // Problem reports
+  PROBLEM_REPORTS_EMAIL: z.string().email().optional(),
   EMAIL_VERIFICATION_REQUIRED: stringBool("false"),
 
   // Asset storage configuration
@@ -212,6 +239,37 @@ const allEnv = z.object({
 
   // Rate limiting configuration
   RATE_LIMITING_ENABLED: stringBool("false"),
+  // Comma-separated IPs/CIDRs of reverse proxies whose X-Forwarded-For entries
+  // are trusted when working out a request's client IP. "private" expands to
+  // the loopback and private-network ranges; "none" trusts nothing. Only
+  // needed for chains of proxies: the one connecting to Karakeep never shows
+  // up in the header. Defaults to "none" because trusting private ranges lets
+  // clients on them pick their own IP.
+  TRUSTED_PROXIES: z
+    .string()
+    .default("none")
+    .transform((val) =>
+      val
+        .split(",")
+        .map((p) => p.trim())
+        .filter((p) => p),
+    )
+    .pipe(
+      z.array(
+        z.union([
+          z.literal("private"),
+          z.literal("none"),
+          z.ipv4(),
+          z.ipv6(),
+          z.cidrv4(),
+          z.cidrv6(),
+        ]),
+        {
+          error:
+            'TRUSTED_PROXIES must be a comma-separated list of IPs, CIDR ranges, "private" or "none"',
+        },
+      ),
+    ),
 
   // Redis configuration
   REDIS_URL: z.string().url().optional(),
@@ -222,6 +280,28 @@ const allEnv = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_PRICE_ID: z.string().optional(),
   STRIPE_YEARLY_PRICE_ID: z.string().optional(),
+
+  // RevenueCat (mobile in-app purchases) configuration
+  REVENUECAT_PROJECT_ID: z.string().optional(),
+  REVENUECAT_SECRET_API_KEY: z.string().optional(),
+  REVENUECAT_WEBHOOK_AUTH_TOKEN: z.string().optional(),
+  REVENUECAT_ENTITLEMENT_ID: z.string().default("pro"),
+  // App Store review and TestFlight purchase in the sandbox against the
+  // production server, so sandbox purchases need to grant the paid tier
+  // unless explicitly disabled.
+  REVENUECAT_ALLOW_SANDBOX_PURCHASES: stringBool("true"),
+  // The platforms whose mobile apps offer purchases (e.g. "ios,android").
+  // None by default, so app builds can ship before billing gets enabled.
+  REVENUECAT_PURCHASE_PLATFORMS: z
+    .string()
+    .prefault("")
+    .transform((val) =>
+      val
+        .split(",")
+        .map((p) => p.trim())
+        .filter((p) => p),
+    )
+    .pipe(z.array(z.enum(["ios", "android"]))),
 
   FREE_QUOTA_BOOKMARK_LIMIT: z.coerce.number().optional(),
   FREE_QUOTA_ASSET_SIZE_BYTES: z.coerce.number().optional(),
@@ -317,6 +397,7 @@ const serverConfigSchema = allEnv.transform((val, ctx) => {
       disableSignups: val.DISABLE_SIGNUPS,
       disablePasswordAuth: val.DISABLE_PASSWORD_AUTH,
       emailVerificationRequired: val.EMAIL_VERIFICATION_REQUIRED,
+      trustedOrigins: val.AUTH_TRUSTED_ORIGINS,
       oauth: {
         autoRedirect: val.OAUTH_AUTO_REDIRECT,
         allowDangerousEmailAccountLinking:
@@ -324,10 +405,9 @@ const serverConfigSchema = allEnv.transform((val, ctx) => {
         wellKnownUrl: val.OAUTH_WELLKNOWN_URL,
         clientSecret: val.OAUTH_CLIENT_SECRET,
         clientId: val.OAUTH_CLIENT_ID,
-        idTokenSignedResponseAlg: val.OAUTH_ID_TOKEN_SIGNED_RESPONSE_ALG,
         scope: val.OAUTH_SCOPE,
+        tokenEndpointAuthMethod: val.OAUTH_TOKEN_ENDPOINT_AUTH_METHOD,
         name: val.OAUTH_PROVIDER_NAME,
-        timeout: val.OAUTH_TIMEOUT,
       },
       turnstile: {
         enabled: val.TURNSTILE_SITE_KEY !== undefined,
@@ -346,6 +426,10 @@ const serverConfigSchema = allEnv.transform((val, ctx) => {
             from: val.SMTP_FROM,
           }
         : undefined,
+    },
+    problemReports: {
+      enabled: !!val.PROBLEM_REPORTS_EMAIL,
+      email: val.PROBLEM_REPORTS_EMAIL,
     },
     inference: {
       isConfigured:
@@ -424,14 +508,19 @@ const serverConfigSchema = allEnv.transform((val, ctx) => {
       browserCookiePath: val.BROWSER_COOKIE_PATH,
       jobTimeoutSec: val.CRAWLER_JOB_TIMEOUT_SEC,
       navigateTimeoutSec: val.CRAWLER_NAVIGATE_TIMEOUT_SEC,
+      challengeWaitSec: val.CRAWLER_CHALLENGE_WAIT_SEC,
+      browserTimezone: val.CRAWLER_BROWSER_TIMEZONE,
       downloadBannerImage: val.CRAWLER_DOWNLOAD_BANNER_IMAGE,
       storeScreenshot: val.CRAWLER_STORE_SCREENSHOT,
       fullPageScreenshot: val.CRAWLER_FULL_PAGE_SCREENSHOT,
       storePdf: val.CRAWLER_STORE_PDF,
       fullPageArchive: val.CRAWLER_FULL_PAGE_ARCHIVE,
+      fullPageArchiveMaxSizeMb: val.CRAWLER_FULL_PAGE_ARCHIVE_MAX_SIZE_MB,
       downloadVideo: val.CRAWLER_VIDEO_DOWNLOAD,
       maxVideoDownloadSize: val.CRAWLER_VIDEO_DOWNLOAD_MAX_SIZE,
       downloadVideoTimeout: val.CRAWLER_VIDEO_DOWNLOAD_TIMEOUT_SEC,
+      downloadVideoOnDemand:
+        val.CRAWLER_VIDEO_DOWNLOAD_ON_DEMAND ?? val.CRAWLER_VIDEO_DOWNLOAD,
       enableAdblocker: val.CRAWLER_ENABLE_ADBLOCKER,
       enableAutoconsent: val.CRAWLER_ENABLE_AUTOCONSENT,
       ytDlpArguments: val.CRAWLER_YTDLP_ARGS,
@@ -454,6 +543,11 @@ const serverConfigSchema = allEnv.transform((val, ctx) => {
             }
           : null,
       preflightUserAgent: val.CRAWLER_PREFLIGHT_USER_AGENT,
+    },
+    sandbox: {
+      serverEnabled: val.SANDBOX_REMOTE_SERVER_ENABLED,
+      url: val.SANDBOX_REMOTE_URL,
+      token: val.SANDBOX_REMOTE_TOKEN,
     },
     ocr: {
       langs: val.OCR_LANGS,
@@ -504,6 +598,7 @@ const serverConfigSchema = allEnv.transform((val, ctx) => {
     assetPreprocessing: {
       numWorkers: val.ASSET_PREPROCESSING_NUM_WORKERS,
       jobTimeoutSec: val.ASSET_PREPROCESSING_JOB_TIMEOUT_SEC,
+      pdfParserMemLimitMb: val.ASSET_PREPROCESSING_PDF_PARSER_MEM_LIMIT_MB,
     },
     ruleEngine: {
       numWorkers: val.RULE_ENGINE_NUM_WORKERS,
@@ -522,12 +617,14 @@ const serverConfigSchema = allEnv.transform((val, ctx) => {
       },
     },
     prometheus: {
+      enabled: val.PROMETHEUS_AUTH_TOKEN !== undefined,
       metricsToken:
         val.PROMETHEUS_AUTH_TOKEN ?? crypto.randomBytes(64).toString("hex"),
     },
     rateLimiting: {
       enabled: val.RATE_LIMITING_ENABLED,
     },
+    trustedProxies: val.TRUSTED_PROXIES,
     redis: {
       url: val.REDIS_URL,
     },
@@ -538,6 +635,18 @@ const serverConfigSchema = allEnv.transform((val, ctx) => {
       priceId: val.STRIPE_PRICE_ID,
       yearlyPriceId: val.STRIPE_YEARLY_PRICE_ID,
       isConfigured: !!val.STRIPE_SECRET_KEY && !!val.STRIPE_PUBLISHABLE_KEY,
+    },
+    revenueCat: {
+      projectId: val.REVENUECAT_PROJECT_ID,
+      secretApiKey: val.REVENUECAT_SECRET_API_KEY,
+      webhookAuthToken: val.REVENUECAT_WEBHOOK_AUTH_TOKEN,
+      entitlementId: val.REVENUECAT_ENTITLEMENT_ID,
+      allowSandboxPurchases: val.REVENUECAT_ALLOW_SANDBOX_PURCHASES,
+      purchasePlatforms: val.REVENUECAT_PURCHASE_PLATFORMS,
+      isConfigured:
+        !!val.REVENUECAT_PROJECT_ID &&
+        !!val.REVENUECAT_SECRET_API_KEY &&
+        !!val.REVENUECAT_WEBHOOK_AUTH_TOKEN,
     },
     quotas: {
       free: {
@@ -584,6 +693,15 @@ const serverConfigSchema = allEnv.transform((val, ctx) => {
     });
     return z.NEVER;
   }
+  if (obj.problemReports.enabled && !obj.email.smtp) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        "To enable problem reports (PROBLEM_REPORTS_EMAIL), SMTP settings must be configured",
+      fatal: true,
+    });
+    return z.NEVER;
+  }
   if (obj.auth.turnstile.enabled && !obj.auth.turnstile.secretKey) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -621,6 +739,15 @@ const serverConfigSchema = allEnv.transform((val, ctx) => {
       code: z.ZodIssueCode.custom,
       message:
         "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT is required when OTEL_EVENT_LOGS_EXPORT_ENABLED is true",
+      fatal: true,
+    });
+    return z.NEVER;
+  }
+  if ((obj.sandbox.serverEnabled || obj.sandbox.url) && !obj.sandbox.token) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        "SANDBOX_REMOTE_TOKEN is required when SANDBOX_REMOTE_SERVER_ENABLED or SANDBOX_REMOTE_URL is set",
       fatal: true,
     });
     return z.NEVER;
@@ -668,6 +795,7 @@ export const clientConfig = {
   },
   crawler: {
     videoDownloadEnabled: serverConfig.crawler.downloadVideo,
+    videoDownloadOnDemand: serverConfig.crawler.downloadVideoOnDemand,
   },
   chat: {
     enabled: serverConfig.chat.enabled,
@@ -681,9 +809,16 @@ export const clientConfig = {
   stripe: {
     isConfigured: serverConfig.stripe.isConfigured,
   },
+  revenueCat: {
+    isConfigured: serverConfig.revenueCat.isConfigured,
+    purchasePlatforms: serverConfig.revenueCat.purchasePlatforms,
+  },
   legal: {
     termsOfServiceUrl: serverConfig.legal.termsOfServiceUrl,
     privacyPolicyUrl: serverConfig.legal.privacyPolicyUrl,
+  },
+  problemReports: {
+    enabled: serverConfig.problemReports.enabled,
   },
   serverVersion: serverConfig.serverVersion,
   disableNewReleaseCheck: serverConfig.disableNewReleaseCheck,

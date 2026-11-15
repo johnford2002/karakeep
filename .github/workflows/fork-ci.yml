@@ -55,7 +55,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
   tests:
-    runs-on: ubuntu-latest
+    # From upstream: Playwright can't install Chromium on Ubuntu 26.04, which
+    # ubuntu-latest now points to.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -75,9 +77,37 @@ jobs:
         working-directory: apps/workers
         run: pnpm test
 
+      # Added with the 2026-11 upstream sync, mirroring upstream's CI. Web
+      # covers the better-auth configuration (server/auth.test.ts).
+      - name: Web Tests
+        working-directory: apps/web
+        run: pnpm test
+
+      - name: API Tests
+        working-directory: packages/api
+        run: pnpm test
+
+      - name: Shared Server Tests
+        working-directory: packages/shared-server
+        run: pnpm test
+
+      - name: MCP Tests
+        working-directory: apps/mcp
+        run: pnpm test
+
+      - name: Mobile Tests
+        working-directory: apps/mobile
+        run: pnpm test
+
       # - name: Plugins Tests
       #   working-directory: packages/plugins
       #   run: pnpm test
+
+      # The e2e suite now includes Playwright browser tests (tests/web), which
+      # launch a local Chromium; setup only runs pnpm install.
+      - name: Install Playwright Chromium
+        working-directory: packages/e2e_tests
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: E2E Tests
         working-directory: packages/e2e_tests

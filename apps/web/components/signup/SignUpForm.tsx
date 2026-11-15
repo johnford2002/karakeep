@@ -17,36 +17,37 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { signIn } from "@/lib/auth/client";
+import { PasswordInput } from "@/components/ui/password-input";
+import { signUp } from "@/lib/auth/client";
 import { useClientConfig } from "@/lib/clientConfig";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Turnstile } from "@marsidev/react-turnstile";
-import { useMutation } from "@tanstack/react-query";
-import { TRPCClientError } from "@trpc/client";
 import { AlertCircle, UserX } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { useTRPC } from "@karakeep/shared-react/trpc";
-import { zSignUpSchema } from "@karakeep/shared/types/users";
+import {
+  PASSWORD_MIN_LENGTH,
+  zSignUpSchema,
+} from "@karakeep/shared/types/users";
 import { isMobileAppRedirect } from "@karakeep/shared/utils/redirectUrl";
 
-const VERIFY_EMAIL_ERROR = "Please verify your email address before signing in";
+import { humanAuthErrors } from "../signin/authFormErrors";
 
 interface SignUpFormProps {
   redirectUrl: string;
 }
 
 export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
-  const api = useTRPC();
   const form = useForm<z.infer<typeof zSignUpSchema>>({
-    resolver: zodResolver(zSignUpSchema),
+    resolver: zodResolver(zSignUpSchema, humanAuthErrors),
     defaultValues: {
       email: "",
       name: "",
@@ -61,8 +62,6 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
   const turnstileSiteKey = clientConfig.turnstile?.siteKey;
   const turnstileRef = useRef<TurnstileInstance>(null);
 
-  const createUserMutation = useMutation(api.users.create.mutationOptions());
-
   if (
     clientConfig.auth.disableSignups ||
     clientConfig.auth.disablePasswordAuth
@@ -70,8 +69,8 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
     return (
       <Card className="w-full">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">
-            Sign Up Unavailable
+          <CardTitle className="text-xl font-semibold">
+            Sign-up unavailable
           </CardTitle>
           <CardDescription>
             Account registration is currently disabled
@@ -80,14 +79,14 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
         <CardContent className="space-y-6">
           <div className="space-y-4">
             <Alert>
-              <UserX className="h-4 w-4" />
+              <UserX className="size-4" />
               <AlertDescription>
                 Signups are currently disabled. Please contact an administrator
                 for access.
               </AlertDescription>
             </Alert>
             <Button asChild className="w-full">
-              <Link href="/signin">Back to Sign In</Link>
+              <Link href="/signin">Back to sign in</Link>
             </Button>
           </div>
         </CardContent>
@@ -98,8 +97,8 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
   return (
     <Card className="w-full">
       <CardHeader className="text-center">
-        <CardTitle className="text-2xl font-bold">
-          Create Your Account
+        <CardTitle className="text-xl font-semibold">
+          Create your account
         </CardTitle>
         <CardDescription>
           Join Karakeep to start organizing your bookmarks
@@ -108,6 +107,9 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
       <CardContent className="space-y-6">
         <Form {...form}>
           <form
+            noValidate
+            // POST so a submit before hydration doesn't put the password in the URL.
+            method="post"
             onSubmit={form.handleSubmit(async (value) => {
               if (turnstileSiteKey && !value.turnstileToken) {
                 form.setError("turnstileToken", {
@@ -117,15 +119,18 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
                 return;
               }
               form.clearErrors("turnstileToken");
-              try {
-                await createUserMutation.mutateAsync({
-                  ...value,
-                  redirectUrl,
-                });
-              } catch (e) {
-                if (e instanceof TRPCClientError) {
-                  setErrorMessage(e.message);
-                }
+              const email = value.email.trim();
+              const resp = await signUp({
+                name: value.name,
+                email,
+                password: value.password,
+                callbackUrl: redirectUrl,
+                turnstileToken: value.turnstileToken,
+              });
+              if (!resp.ok) {
+                setErrorMessage(
+                  resp.error ?? "Hit an unexpected error while signing up",
+                );
                 // Reset turnstile widget on error to get a new token
                 if (turnstileSiteKey) {
                   turnstileRef.current?.reset();
@@ -133,26 +138,11 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
                 }
                 return;
               }
-              const resp = await signIn("credentials", {
-                redirect: false,
-                email: value.email.trim(),
-                password: value.password,
-              });
-              if (!resp || !resp.ok || resp.error) {
-                if (resp?.error === VERIFY_EMAIL_ERROR) {
-                  router.replace(
-                    `/check-email?email=${encodeURIComponent(value.email.trim())}&redirectUrl=${encodeURIComponent(redirectUrl)}`,
-                  );
-                } else {
-                  setErrorMessage(
-                    resp?.error ?? "Hit an unexpected error while signing in",
-                  );
-                }
-                // Reset turnstile widget on error to get a new token
-                if (turnstileSiteKey) {
-                  turnstileRef.current?.reset();
-                  form.setValue("turnstileToken", "");
-                }
+              if (!resp.signedIn) {
+                // The email address has to be verified before signing in.
+                router.replace(
+                  `/check-email?email=${encodeURIComponent(email)}&redirectUrl=${encodeURIComponent(redirectUrl)}`,
+                );
                 return;
               }
               if (isMobileAppRedirect(redirectUrl)) {
@@ -165,7 +155,7 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
           >
             {errorMessage && (
               <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
+                <AlertCircle className="size-4" />
                 <AlertDescription>{errorMessage}</AlertDescription>
               </Alert>
             )}
@@ -175,10 +165,12 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Full Name</FormLabel>
+                  <FormLabel>Full name</FormLabel>
                   <FormControl>
                     <Input
                       type="text"
+                      autoComplete="name"
+                      autoFocus
                       placeholder="Enter your full name"
                       {...field}
                     />
@@ -197,6 +189,8 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
                   <FormControl>
                     <Input
                       type="email"
+                      autoComplete="email"
+                      spellCheck={false}
                       placeholder="Enter your email"
                       {...field}
                     />
@@ -209,16 +203,21 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
             <FormField
               control={form.control}
               name="password"
-              render={({ field }) => (
+              render={({ field, fieldState }) => (
                 <FormItem>
                   <FormLabel>Password</FormLabel>
                   <FormControl>
-                    <Input
-                      type="password"
+                    <PasswordInput
+                      autoComplete="new-password"
                       placeholder="Create a password"
                       {...field}
                     />
                   </FormControl>
+                  {!fieldState.error && (
+                    <FormDescription>
+                      Use at least {PASSWORD_MIN_LENGTH} characters
+                    </FormDescription>
+                  )}
                   <FormMessage />
                 </FormItem>
               )}
@@ -229,10 +228,10 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
               name="confirmPassword"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Confirm Password</FormLabel>
+                  <FormLabel>Confirm password</FormLabel>
                   <FormControl>
-                    <Input
-                      type="password"
+                    <PasswordInput
+                      autoComplete="new-password"
                       placeholder="Confirm your password"
                       {...field}
                     />
@@ -276,9 +275,7 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
 
             <ActionButton
               type="submit"
-              loading={
-                form.formState.isSubmitting || createUserMutation.isPending
-              }
+              loading={form.formState.isSubmitting}
               className="w-full"
             >
               Sign up
@@ -296,7 +293,7 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
                     rel="noopener noreferrer"
                     className="underline hover:text-foreground"
                   >
-                    Terms of Service
+                    terms of service
                   </Link>
                 )}
                 {clientConfig.legal.termsOfServiceUrl &&
@@ -309,7 +306,7 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
                     rel="noopener noreferrer"
                     className="underline hover:text-foreground"
                   >
-                    Privacy Policy
+                    privacy policy
                   </Link>
                 )}
                 .
@@ -319,11 +316,11 @@ export default function SignUpForm({ redirectUrl }: SignUpFormProps) {
         </Form>
 
         <div className="text-center">
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-muted-foreground">
             Already have an account?{" "}
             <Link
               href="/signin"
-              className="font-medium text-blue-600 hover:text-blue-500"
+              className="font-medium text-foreground underline underline-offset-4 hover:text-muted-foreground"
             >
               Sign in
             </Link>

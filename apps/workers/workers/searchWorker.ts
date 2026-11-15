@@ -1,6 +1,4 @@
 import { eq } from "drizzle-orm";
-import { workerStatsCounter } from "metrics";
-import { withWorkerEventLog, withWorkerTracing } from "workerTracing";
 
 import type { ZSearchIndexingRequest } from "@karakeep/shared-server";
 import { db } from "@karakeep/db";
@@ -19,6 +17,9 @@ import {
   SearchIndexClient,
 } from "@karakeep/shared/search";
 import { Bookmark } from "@karakeep/trpc/models/bookmarks";
+
+import { workerStatsCounter } from "../metrics";
+import { withWorkerEventLog, withWorkerTracing } from "../workerTracing";
 
 export class SearchIndexingWorker {
   static async build() {
@@ -123,6 +124,20 @@ async function runIndex(
   });
 
   await searchClient.addDocuments([document], { batch });
+
+  // The bookmark might have been deleted while we were building the document,
+  // and its delete could have reached the index before our add. If it's gone
+  // now, remove it. Otherwise, the delete gets enqueued after our add landed.
+  const stillExists = await db.query.bookmarks.findFirst({
+    where: eq(bookmarks.id, bookmarkId),
+    columns: { id: true },
+  });
+  if (!stillExists) {
+    logger.info(
+      `[search] Bookmark ${bookmarkId} was deleted while indexing, removing it from the index ...`,
+    );
+    await searchClient.deleteDocuments([bookmarkId], { batch });
+  }
 }
 
 async function runDelete(

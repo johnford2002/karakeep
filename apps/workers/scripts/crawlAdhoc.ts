@@ -16,9 +16,10 @@ import { parseArgs } from "node:util";
  * queue, DB job, or downstream (inference/search/archival) machinery. Meant for
  * manual debugging and for the crawler A/B test (021-crawler-stealth-ab-test).
  *
- * DB safety: crawlPage() with the override does NOT read or write any app data
- * (the per-user lookup is skipped; asset/bookmark/search/webhook writes live in
- * downstream functions this CLI never calls). BUT importing the crawler module
+ * DB safety: crawlPage() does NOT read or write any app data (the per-user
+ * browserCrawlingEnabled lookup happens in runCrawler and the
+ * asset/bookmark/search/webhook writes live in downstream functions, none of
+ * which this CLI calls). BUT importing the crawler module
  * transitively opens a SQLite connection (packages/db/drizzle.ts) against
  * DATA_DIR. To guarantee we never touch the real DB, this bootstrap repoints
  * DATA_DIR at a throwaway temp dir BEFORE any app module is imported. Set
@@ -89,8 +90,10 @@ function scoreHtml(
 async function main() {
   // Dynamic imports so the DATA_DIR override above takes effect first.
   const { default: serverConfig } = await import("@karakeep/shared/config");
-  const { selectRunProxies } = await import("network");
-  const { crawlPage, CrawlerWorker } = await import("workers/crawlerWorker");
+  const { selectRunProxies } = await import("../network");
+  const { CrawlerWorker } = await import("../workers/crawlerWorker");
+  const { crawlLogger } = await import("../workers/crawler/common");
+  const { crawlPage } = await import("../workers/crawler/localCrawler");
 
   const { values } = parseArgs({
     options: {
@@ -141,14 +144,18 @@ async function main() {
       let record: Record<string, unknown>;
       try {
         const res = await crawlPage(
-          jobId,
-          url,
-          "adhoc",
-          values.pdf,
-          abort.signal,
-          runProxy,
-          // Force the full browser path and skip the per-user DB lookup.
-          true,
+          {
+            jobId,
+            bookmarkId: "adhoc",
+            userId: "adhoc",
+            url,
+            abortSignal: abort.signal,
+            runProxy,
+            // Force the full browser path.
+            browserCrawlingEnabled: true,
+            log: crawlLogger(jobId),
+          },
+          { forceStorePdf: values.pdf },
         );
         const { blocked, marker } = scoreHtml(res.statusCode, res.htmlContent);
         if (screenshotDir && res.screenshot) {

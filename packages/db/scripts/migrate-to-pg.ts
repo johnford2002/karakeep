@@ -27,6 +27,13 @@ import type postgres from "postgres";
 
 import serverConfig, { buildPgConnectionString } from "@karakeep/shared/config";
 
+import type { TablePlan } from "./migrateToPgPlan";
+import {
+  buildTablePlans,
+  convertValue,
+  orderSelfReferencingRows,
+} from "./migrateToPgPlan";
+
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -65,317 +72,131 @@ console.log(`  PG target      : ${maskPassword(connectionString)}`);
 console.log();
 
 // ---------------------------------------------------------------------------
-// Type definitions
-// ---------------------------------------------------------------------------
-
-interface TableSpec {
-  /** SQLite table name to read from */
-  table: string;
-  /** Columns that contain epoch-second (or epoch-ms) integer timestamps */
-  timestampCols?: string[];
-  /**
-   * Columns that store epoch-millisecond timestamps (Drizzle's
-   * `integer({ mode: "timestamp_ms" })`).  When absent, any column listed in
-   * `timestampCols` is assumed to be epoch-seconds.
-   */
-  timestampMsCols?: string[];
-  /** Columns that store 0/1 integers representing booleans */
-  boolCols?: string[];
-  /** Columns that store JSON text which should be parsed before insert */
-  jsonCols?: string[];
-  /** Columns to omit from the insert (e.g. generated/computed columns) */
-  skipCols?: string[];
-}
-
-// ---------------------------------------------------------------------------
-// Table specifications (order respects foreign-key dependencies)
-// ---------------------------------------------------------------------------
-
-const TABLE_SPECS: TableSpec[] = [
-  // ---- auth / user tables ----
-  {
-    table: "user",
-    timestampMsCols: ["emailVerified"],
-    boolCols: [
-      "browserCrawlingEnabled",
-      "backupsEnabled",
-      "autoTaggingEnabled",
-      "autoSummarizationEnabled",
-    ],
-    jsonCols: ["curatedTagIds"],
-  },
-  {
-    table: "config",
-  },
-  {
-    table: "account",
-  },
-  {
-    table: "session",
-    timestampMsCols: ["expires"],
-  },
-  {
-    table: "verificationToken",
-    timestampMsCols: ["expires"],
-  },
-  {
-    table: "passwordResetToken",
-    timestampMsCols: ["expires"],
-    timestampCols: ["createdAt"],
-  },
-  {
-    table: "apiKey",
-    timestampCols: ["createdAt", "lastUsedAt"],
-  },
-
-  // ---- core bookmark tables ----
-  {
-    table: "bookmarks",
-    timestampCols: ["createdAt", "modifiedAt"],
-    boolCols: ["archived", "favourited"],
-  },
-  {
-    table: "bookmarkLinks",
-    timestampCols: ["datePublished", "dateModified", "crawledAt"],
-  },
-  {
-    table: "bookmarkTexts",
-  },
-  {
-    table: "bookmarkAssets",
-  },
-  {
-    table: "assets",
-  },
-  {
-    table: "bookmarkTags",
-    timestampCols: ["createdAt"],
-    skipCols: ["normalizedName"],
-  },
-  {
-    table: "tagsOnBookmarks",
-    timestampCols: ["attachedAt"],
-  },
-
-  // ---- highlights / reading progress ----
-  {
-    table: "highlights",
-    timestampCols: ["createdAt"],
-  },
-  {
-    table: "userReadingProgress",
-    timestampCols: ["modifiedAt"],
-  },
-
-  // ---- lists ----
-  {
-    table: "bookmarkLists",
-    timestampCols: ["createdAt"],
-    boolCols: ["public"],
-  },
-  {
-    table: "bookmarksInLists",
-    timestampCols: ["addedAt"],
-  },
-  {
-    table: "listCollaborators",
-    timestampCols: ["createdAt"],
-  },
-  {
-    table: "listInvitations",
-    timestampCols: ["invitedAt"],
-  },
-
-  // ---- prompts / feeds / webhooks ----
-  {
-    table: "customPrompts",
-    timestampCols: ["createdAt"],
-    boolCols: ["enabled"],
-  },
-  {
-    table: "rssFeeds",
-    timestampCols: ["createdAt", "lastFetchedAt", "lastSuccessfulFetchAt"],
-    boolCols: ["enabled", "importTags"],
-  },
-  {
-    table: "rssFeedImports",
-    timestampCols: ["createdAt"],
-  },
-  {
-    table: "webhooks",
-    timestampCols: ["createdAt"],
-    jsonCols: ["events"],
-  },
-
-  // ---- backups ----
-  {
-    table: "backups",
-    timestampCols: ["createdAt"],
-  },
-
-  // ---- rule engine ----
-  {
-    table: "ruleEngineRules",
-    boolCols: ["enabled"],
-  },
-  {
-    table: "ruleEngineActions",
-  },
-
-  // ---- invites / subscriptions ----
-  {
-    table: "invites",
-    timestampCols: ["createdAt", "usedAt"],
-  },
-  {
-    table: "subscriptions",
-    timestampCols: ["startDate", "endDate", "createdAt", "modifiedAt"],
-    boolCols: ["cancelAtPeriodEnd"],
-  },
-
-  // ---- import sessions ----
-  {
-    table: "importSessions",
-    timestampCols: ["lastProcessedAt", "createdAt", "modifiedAt"],
-  },
-  {
-    table: "importSessionBookmarks",
-    timestampCols: ["createdAt"],
-  },
-  {
-    table: "importStagingBookmarks",
-    timestampCols: [
-      "sourceAddedAt",
-      "processingStartedAt",
-      "createdAt",
-      "completedAt",
-    ],
-    boolCols: ["archived"],
-    jsonCols: ["tags", "listIds"],
-  },
-];
-
-// ---------------------------------------------------------------------------
-// Data-type transformation helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Convert an epoch-second integer (as stored by Drizzle's
- * `integer({ mode: "timestamp" })`) to a JavaScript Date.
- * Returns null for null/undefined values.
- */
-function epochSecToDate(value: unknown): Date | null {
-  if (value === null || value === undefined) return null;
-  return new Date((value as number) * 1000);
-}
-
-/**
- * Convert an epoch-millisecond integer (as stored by Drizzle's
- * `integer({ mode: "timestamp_ms" })`) to a JavaScript Date.
- * Returns null for null/undefined values.
- */
-function epochMsToDate(value: unknown): Date | null {
-  if (value === null || value === undefined) return null;
-  return new Date(value as number);
-}
-
-/** Convert a SQLite 0/1 integer to a JavaScript boolean. */
-function intToBool(value: unknown): boolean | null {
-  if (value === null || value === undefined) return null;
-  return (value as number) !== 0;
-}
-
-/** Parse a JSON text column. */
-function parseJson(value: unknown): unknown {
-  if (value === null || value === undefined) return null;
-  if (typeof value !== "string") return value;
-  return JSON.parse(value);
-}
-
-/**
- * Transform a raw SQLite row according to the table spec.
- * Returns a new record with the appropriate JS types substituted.
- */
-function transformRow(
-  row: Record<string, unknown>,
-  spec: TableSpec,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-
-  for (const [col, value] of Object.entries(row)) {
-    // Skip generated / computed columns
-    if (spec.skipCols?.includes(col)) continue;
-
-    if (spec.timestampMsCols?.includes(col)) {
-      result[col] = epochMsToDate(value);
-    } else if (spec.timestampCols?.includes(col)) {
-      result[col] = epochSecToDate(value);
-    } else if (spec.boolCols?.includes(col)) {
-      result[col] = intToBool(value);
-    } else if (spec.jsonCols?.includes(col)) {
-      result[col] = parseJson(value);
-    } else {
-      result[col] = value;
-    }
-  }
-
-  return result;
-}
-
-// ---------------------------------------------------------------------------
 // Core migration logic
 // ---------------------------------------------------------------------------
 
 const CHUNK_SIZE = 500;
 
+/** Tables in the SQLite file that aren't app data. */
+const NON_APP_TABLES = new Set(["__drizzle_migrations", "sqlite_sequence"]);
+
+/**
+ * Refuses to copy from a SQLite file whose tables or columns don't match the
+ * schema this script was built against -- e.g. one that hasn't been migrated
+ * to the same version, or that has tables this copy would silently skip.
+ */
+function checkSqliteMatchesPlans(
+  sqlite: Database.Database,
+  plans: TablePlan[],
+): void {
+  const planned = new Map(plans.map((p) => [p.table, p]));
+  const tables = (
+    sqlite
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`,
+      )
+      .all() as { name: string }[]
+  )
+    .map((r) => r.name)
+    .filter((name) => !NON_APP_TABLES.has(name));
+
+  const problems: string[] = [];
+  for (const table of tables) {
+    const plan = planned.get(table);
+    if (!plan) {
+      problems.push(`table "${table}" isn't in the schema`);
+      continue;
+    }
+    const actual = new Set(
+      (
+        sqlite.prepare(`PRAGMA table_xinfo("${table}")`).all() as {
+          name: string;
+          hidden: number;
+        }[]
+      )
+        // hidden 2/3 = generated columns, which aren't copied.
+        .filter((c) => c.hidden !== 2 && c.hidden !== 3)
+        .map((c) => c.name),
+    );
+    for (const { name } of plan.columns) {
+      if (!actual.has(name)) problems.push(`"${table}.${name}" is missing`);
+    }
+    for (const name of actual) {
+      if (!plan.columns.some((c) => c.name === name)) {
+        problems.push(`"${table}.${name}" isn't in the schema`);
+      }
+    }
+  }
+  for (const plan of plans) {
+    if (!tables.includes(plan.table)) {
+      problems.push(`table "${plan.table}" is missing`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      "The SQLite database doesn't match the schema this script copies. " +
+        "Start Karakeep once on the SQLite database (so its migrations run), " +
+        "using the same version as this script, then retry.\n  - " +
+        problems.join("\n  - "),
+    );
+  }
+}
+
 async function migrateTable(
   sqlite: Database.Database,
   pg: postgres.Sql,
-  spec: TableSpec,
+  plan: TablePlan,
 ): Promise<void> {
-  const { table } = spec;
+  const { table, columns: columnPlans } = plan;
+  const columns = columnPlans.map((c) => c.name);
+  const colList = columns.map((c) => `"${c}"`).join(", ");
 
-  // Count rows for progress reporting
-  const countRow = sqlite
-    .prepare(`SELECT COUNT(*) as cnt FROM "${table}"`)
-    .get() as { cnt: number };
-  const totalRows = countRow.cnt;
-
+  const totalRows = (
+    sqlite.prepare(`SELECT COUNT(*) as cnt FROM "${table}"`).get() as {
+      cnt: number;
+    }
+  ).cnt;
   if (totalRows === 0) {
     console.log(`  [${table}] 0 rows — skipping`);
     return;
   }
 
-  // Read all column names (minus skipped ones) by inspecting the first row
-  // via SQLite's PRAGMA table_info.
-  const columns: string[] = (
-    sqlite.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[]
-  )
-    .map((r) => r.name)
-    .filter((col) => !(spec.skipCols ?? []).includes(col));
+  const convert = (raw: Record<string, unknown>) => {
+    const row: Record<string, unknown> = {};
+    for (const { name, conversion } of columnPlans) {
+      row[name] = convertValue(conversion, raw[name]);
+    }
+    return row;
+  };
 
   let insertedCount = 0;
-
-  // Stream in chunks
-  const stmt = sqlite.prepare(`SELECT * FROM "${table}"`);
-  let chunk: Record<string, unknown>[] = [];
-
-  for (const rawRow of stmt.iterate()) {
-    const transformed = transformRow(rawRow as Record<string, unknown>, spec);
-    chunk.push(transformed);
-
-    if (chunk.length >= CHUNK_SIZE) {
-      await insertChunk(pg, table, columns, chunk);
-      insertedCount += chunk.length;
-      console.log(`  [${table}] ${insertedCount} / ${totalRows} rows inserted`);
-      chunk = [];
-    }
-  }
-
-  // Flush remaining rows
-  if (chunk.length > 0) {
+  const flush = async (chunk: Record<string, unknown>[]) => {
     await insertChunk(pg, table, columns, chunk);
     insertedCount += chunk.length;
+    console.log(`  [${table}] ${insertedCount} / ${totalRows} rows inserted`);
+  };
+
+  const stmt = sqlite.prepare(`SELECT ${colList} FROM "${table}"`);
+  if (plan.selfReferences.length > 0) {
+    // Parents have to be inserted before the rows pointing at them, so these
+    // (small) tables are ordered in memory first.
+    const rows = orderSelfReferencingRows(
+      (stmt.all() as Record<string, unknown>[]).map(convert),
+      plan.selfReferences,
+    );
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      await flush(rows.slice(i, i + CHUNK_SIZE));
+    }
+  } else {
+    let chunk: Record<string, unknown>[] = [];
+    for (const raw of stmt.iterate()) {
+      chunk.push(convert(raw as Record<string, unknown>));
+      if (chunk.length >= CHUNK_SIZE) {
+        await flush(chunk);
+        chunk = [];
+      }
+    }
+    if (chunk.length > 0) await flush(chunk);
   }
 
   console.log(`  [${table}] Done — ${insertedCount} rows migrated`);
@@ -424,6 +245,10 @@ async function main(): Promise<void> {
   const sqlite = new BetterSQLite(sqlitePath, { readonly: true });
   console.log("SQLite database opened (readonly).");
 
+  // Fail before touching PostgreSQL if anything can't be copied faithfully.
+  const plans = buildTablePlans();
+  checkSqliteMatchesPlans(sqlite, plans);
+
   // Connect to PostgreSQL
   const pgClient = require("postgres") as typeof postgres;
   const pg = pgClient(connectionString);
@@ -437,16 +262,22 @@ async function main(): Promise<void> {
     migrate: typeof pgMigrate;
   };
 
-  const pgDrizzle = drizzle(pg);
-  await migrate(pgDrizzle, {
+  // The migrator gets its own connection. drizzle(client) swaps the client's
+  // timestamp and JSON serializers for pass-throughs, since drizzle encodes
+  // those itself -- and the raw inserts below hand postgres-js Date objects
+  // and parsed JSON, which it can then no longer encode ("The string argument
+  // must be of type string ... Received an instance of Date").
+  const migrationClient = pgClient(connectionString, { max: 1 });
+  await migrate(drizzle(migrationClient), {
     migrationsFolder: path.resolve(__dirname, "../migrations/pg"),
   });
+  await migrationClient.end();
   console.log("Migrations complete.\n");
 
   // Migrate each table in dependency order
-  console.log(`Migrating ${TABLE_SPECS.length} tables...\n`);
-  for (const spec of TABLE_SPECS) {
-    await migrateTable(sqlite, pg, spec);
+  console.log(`Migrating ${plans.length} tables...\n`);
+  for (const plan of plans) {
+    await migrateTable(sqlite, pg, plan);
   }
 
   // Cleanup

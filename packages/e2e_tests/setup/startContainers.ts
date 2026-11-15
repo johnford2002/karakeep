@@ -2,7 +2,7 @@ import { execSync } from "child_process";
 import net from "net";
 import path from "path";
 import { fileURLToPath } from "url";
-import type { GlobalSetupContext } from "vitest/node";
+import type { TestProject } from "vitest/node";
 
 import { waitUntil } from "../utils/general";
 
@@ -43,23 +43,25 @@ async function waitForAimockHealthy(
   );
 }
 
-export default async function ({ provide }: GlobalSetupContext) {
+export default async function ({ provide }: TestProject) {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const karakeepPort = await getRandomPort();
+  const karakeepRemotePort = await getRandomPort();
   const aimockPort = await getRandomPort();
   const meiliPort = await getRandomPort();
 
   const buildArg = process.env.E2E_TEST_NO_BUILD ? "" : "--build";
 
   console.log(
-    `Starting docker compose on ports karakeep=${karakeepPort} aimock=${aimockPort} meili=${meiliPort}...`,
+    `Starting docker compose on ports karakeep=${karakeepPort} karakeep-remote=${karakeepRemotePort} aimock=${aimockPort} meili=${meiliPort}...`,
   );
-  execSync(`docker compose up ${buildArg} -d`, {
+  execSync(`docker compose up ${buildArg} -d --wait --wait-timeout 60`, {
     cwd: __dirname,
     stdio: "inherit",
     env: {
       ...process.env,
       KARAKEEP_PORT: karakeepPort.toString(),
+      KARAKEEP_REMOTE_PORT: karakeepRemotePort.toString(),
       AIMOCK_PORT: aimockPort.toString(),
       MEILI_PORT: meiliPort.toString(),
     },
@@ -68,6 +70,7 @@ export default async function ({ provide }: GlobalSetupContext) {
   console.log("Waiting for services to become healthy...");
   await Promise.all([
     waitForHealthy(karakeepPort),
+    waitForHealthy(karakeepRemotePort),
     waitForAimockHealthy(aimockPort),
   ]);
 
@@ -75,6 +78,7 @@ export default async function ({ provide }: GlobalSetupContext) {
   await new Promise((resolve) => setTimeout(resolve, 5000));
 
   provide("karakeepPort", karakeepPort);
+  provide("karakeepRemotePort", karakeepRemotePort);
   provide("aimockPort", aimockPort);
   provide("meiliPort", meiliPort);
 
@@ -90,10 +94,12 @@ export default async function ({ provide }: GlobalSetupContext) {
 
       const services = [
         "web",
+        "web-remote",
+        "sandbox",
         "meilisearch",
         "chrome",
         "nginx",
-        "minio",
+        "garage",
         "aimock",
       ];
       for (const service of services) {
@@ -125,6 +131,7 @@ export default async function ({ provide }: GlobalSetupContext) {
 declare module "vitest" {
   export interface ProvidedContext {
     karakeepPort: number;
+    karakeepRemotePort: number;
     aimockPort: number;
     meiliPort: number;
   }

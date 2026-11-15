@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
+import { isUniqueConstraintError } from "@karakeep/db";
 import { apiKeys } from "@karakeep/db/schema";
 import { addLogFields, logEvent } from "@karakeep/shared-server";
 import serverConfig from "@karakeep/shared/config";
@@ -17,6 +18,7 @@ import {
   validatePassword,
 } from "../auth";
 import {
+  authedProcedure,
   createEventLogMiddleware,
   createRateLimitMiddleware,
   publicProcedure,
@@ -51,7 +53,15 @@ export const apiKeysAppRouter = router({
         ctx.user.id,
         ctx.db,
         scopes,
-      );
+      ).catch((e) => {
+        if (isUniqueConstraintError(e)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "You already have an API key with this name",
+          });
+        }
+        throw e;
+      });
       addLogFields<"apiKey.create">({
         "apiKey.id": created.id,
         "apiKey.source": "session",
@@ -86,7 +96,10 @@ export const apiKeysAppRouter = router({
         key: await regenerateApiKey(existingKey.id, ctx.user.id, ctx.db),
       };
     }),
-  revoke: sessionProcedure
+  // Sessions can revoke any of the user's keys. An API key can only revoke
+  // itself, which is how the mobile app and the extension clean up their key
+  // on sign out.
+  revoke: authedProcedure
     .use(createEventLogMiddleware("apiKey.revoke"))
     .input(
       z.object({
@@ -95,6 +108,18 @@ export const apiKeysAppRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       addLogFields<"apiKey.revoke">({ "apiKey.id": input.id });
+      if (ctx.auth?.type === "apiKey") {
+        const key = await ctx.db.query.apiKeys.findFirst({
+          where: and(eq(apiKeys.id, input.id), eq(apiKeys.userId, ctx.user.id)),
+          columns: { keyId: true },
+        });
+        if (key?.keyId !== ctx.auth.keyId) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "API keys can only revoke themselves",
+          });
+        }
+      }
       await ctx.db
         .delete(apiKeys)
         .where(and(eq(apiKeys.id, input.id), eq(apiKeys.userId, ctx.user.id)));
