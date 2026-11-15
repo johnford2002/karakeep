@@ -956,7 +956,7 @@ export const bookmarksAppRouter = router({
       }
       const link = await ctx.db.query.bookmarkLinks.findFirst({
         where: eq(bookmarkLinks.id, input.bookmarkId),
-        columns: { url: true },
+        columns: { url: true, videoDownloadStatus: true },
       });
       if (!link) {
         throw new TRPCError({
@@ -979,17 +979,27 @@ export const bookmarksAppRouter = router({
           .set({ modifiedAt: new Date() })
           .where(eq(bookmarks.id, input.bookmarkId));
       });
-      await VideoWorkerQueue.enqueue(
-        {
-          bookmarkId: input.bookmarkId,
-          url: link.url,
-          onDemand: true,
-        },
-        {
-          groupId: ctx.user.id,
-          idempotencyKey: `video:${input.bookmarkId}`,
-        },
-      );
+      try {
+        await VideoWorkerQueue.enqueue(
+          {
+            bookmarkId: input.bookmarkId,
+            url: link.url,
+            onDemand: true,
+          },
+          {
+            groupId: ctx.user.id,
+            idempotencyKey: `video:${input.bookmarkId}`,
+          },
+        );
+      } catch (e) {
+        // No job will ever finish this download, so don't leave it "pending":
+        // the UI would spin and hide the action that could retry it.
+        await ctx.db
+          .update(bookmarkLinks)
+          .set({ videoDownloadStatus: link.videoDownloadStatus })
+          .where(eq(bookmarkLinks.id, input.bookmarkId));
+        throw e;
+      }
     }),
   updateReadingProgress: bookmarksProcedure
     .input(

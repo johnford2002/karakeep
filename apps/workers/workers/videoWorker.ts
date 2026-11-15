@@ -70,14 +70,26 @@ export class VideoWorker {
         },
         onError: async (job) => {
           workerStatsCounter.labels("video", "failed").inc();
-          if (job.numRetriesLeft == 0) {
-            workerStatsCounter.labels("video", "failed_permanent").inc();
-          }
           const jobId = job.id;
           logger.error(
             `[VideoCrawler][${jobId}] Video Download job failed: ${job.error}`,
           );
-          return Promise.resolve();
+          if (job.numRetriesLeft == 0) {
+            workerStatsCounter.labels("video", "failed_permanent").inc();
+            // runWorker records its own failures, but not ones it can't catch:
+            // a timeout or abort, or a throw before its try block. Without
+            // this the status stays "downloading", so clients poll forever and
+            // the UI hides the retry. Retries keep it as is, since another
+            // attempt is coming.
+            const bookmarkId = job.data?.bookmarkId;
+            if (bookmarkId) {
+              await setVideoDownloadStatus(bookmarkId, "failure").catch((e) =>
+                logger.error(
+                  `[VideoCrawler][${jobId}] Failed to record the video download failure: ${e}`,
+                ),
+              );
+            }
+          }
         },
       },
       {

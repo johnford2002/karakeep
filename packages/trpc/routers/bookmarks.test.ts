@@ -1425,6 +1425,38 @@ describe("Bookmark Routes", () => {
       }
       expect(enqueueMock).toHaveBeenCalledTimes(1);
     });
+
+    test<CustomTestContext>("marks the download pending, and undoes that if it can't be enqueued", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+      const bookmark = await api.createBookmark({
+        url: "https://youtube.com/watch?v=abc",
+        type: BookmarkTypes.LINK,
+      });
+      const videoStatus = async () => {
+        const b = await api.getBookmark({ bookmarkId: bookmark.id });
+        assert(b.content.type === BookmarkTypes.LINK);
+        return b.content.videoDownloadStatus;
+      };
+      const enqueueMock = getTestQueueMocks().videoWorkerEnqueue;
+
+      const originalValue = serverConfig.crawler.downloadVideoOnDemand;
+      serverConfig.crawler.downloadVideoOnDemand = true;
+      try {
+        enqueueMock.mockRejectedValueOnce(new Error("queue unavailable"));
+        await expect(
+          api.preserveVideo({ bookmarkId: bookmark.id }),
+        ).rejects.toThrow(/queue unavailable/);
+        // No job exists to finish it, so it must not be left pending.
+        expect(await videoStatus()).toBeNull();
+
+        await api.preserveVideo({ bookmarkId: bookmark.id });
+        expect(await videoStatus()).toBe("pending");
+      } finally {
+        serverConfig.crawler.downloadVideoOnDemand = originalValue;
+      }
+    });
   });
 
   describe("Bookmark Quotas", () => {
